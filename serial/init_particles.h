@@ -5,6 +5,7 @@ typedef struct {
     double x, y;
     long vx, vy;
     long long m;
+    long gravity_x, gravity_y;
 } particle_t;
 
 // Function prototype
