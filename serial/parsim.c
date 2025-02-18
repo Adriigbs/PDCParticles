@@ -7,8 +7,12 @@
 
 
 #define G 6.67408e-11  
+#define DELTA 0.1
+#define EPSILON 0.005
 
 #define GRAV_FORCE(m1, m2, d) ((G * (m1) * (m2)) / ((d) * (d)))
+#define SPEED(v_i, a, t) ((v_i) + (a) * (t))
+#define POSITION(x_i, v_i, a, t) ((x_i) + (v_i) * (t) + 0.5 * (a) * (t) * (t))
 
 
 typedef struct {
@@ -16,7 +20,6 @@ typedef struct {
     long long m;
     long long n_particles;
 } cell_t;
-
 
 
 void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, long long *n_part, long *n_steps) {
@@ -83,6 +86,26 @@ void update_particles(particle_t *particles, long long n_part, cell_t *grid_cent
         }
 
 
+        particles[i].gravity_x = force_x;
+        particles[i].gravity_y = force_y;
+
+    }
+
+
+    // Update position and speed of particles
+    for (long long i = 0; i < n_part; i++) {
+
+        long acceleration_x = particles[i].gravity_x / particles[i].m;
+        long acceleration_y = particles[i].gravity_y / particles[i].m;
+
+
+        // Update position
+        particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
+        particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
+
+        // Update speed
+        particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
+        particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
     }
 
 }
@@ -91,9 +114,6 @@ void update_particles(particle_t *particles, long long n_part, cell_t *grid_cent
 
 // Calculate the center of mass of each cell
 void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, long cell_side, long seed) {
-
-
-    
 
     for(long long i = 0; i < n_part; i++) {
 
@@ -120,6 +140,29 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *g
         }
     }
     
+}
+
+
+void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, long cell_side, particle_t **particles_per_cell, long *cell_offsets) {
+
+    cell_offsets[0] = 0;
+    for (long i = 1; i < ncside * ncside; i++) {
+        cell_offsets[i] = cell_offsets[i-1] + grid_center_of_mass[i-1].n_particles;
+    }
+
+    // Sort particles by cell
+    for (long long i = 0; i < n_part; i++) {
+        
+        long x = particles[i].x / cell_side;
+        long y = particles[i].y / cell_side;
+
+        long cell_index = y * ncside + x;
+        long offset = cell_offsets[cell_index];
+        particles_per_cell[offset] = &particles[i];
+        cell_offsets[cell_index]++;
+
+    }
+
 }
 
 
@@ -152,42 +195,33 @@ int main(int argc, char **argv)
     particle_t *particles = (particle_t*) malloc(n_part * sizeof(particle_t));
     init_particles(seed, side, ncside, n_part, particles);
 
+    for (long long i = 0; i < n_part; i++) {
+        printf("%lf %lf %lf %lf %lf\n", particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].m);
+    }
+
+
     exec_time = -omp_get_wtime();
 
     particle_t **particles_per_cell = (particle_t**) malloc(n_part * sizeof(particle_t*));
     long *cell_offsets = (long*) malloc(ncside * ncside * sizeof(long));
 
-    cell_offsets[0] = 0;
-    for (long i = 1; i < ncside * ncside; i++) {
-        cell_offsets[i] = cell_offsets[i-1] + grid_center_of_mass[i-1].n_particles;
-    }
 
-    // Sort particles by cell
-    for (long long i = 0; i < n_part; i++) {
-        
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
-
-        long cell_index = y * ncside + x;
-        long offset = cell_offsets[cell_index];
-        particles_per_cell[offset] = &particles[i];
-        cell_offsets[cell_index]++;
-
-    }
-
-    for (long i = 0; i < time_steps; i++) {
+    //for (long i = 0; i < time_steps; i++) {
 
 
         calculate_center_of_mass(particles, n_part, grid_center_of_mass, ncside, cell_side, seed);
-        // TODO: Separate particles by cells, not sure how to do this efficiently yet because particles come in a 1D array and we cannot change init_particles.c
+        particles_by_cell(particles, n_part, grid_center_of_mass, ncside, cell_side, particles_per_cell, cell_offsets);
         // TODO: Iterate over each particle and calculate the force for x and y of each particle with the particles in the same cell and the 8 adjacent cells
         // TODO: Update the position of each particle, maybe this part can be done in the same loop as the previous one
         // TODO: Check collisions and remove particles if necessary
         // TODO: Update cells
 
-    }
+    //}
     
-
+    free(particles);
+    free(grid_center_of_mass);
+    free(particles_per_cell);
+    free(cell_offsets);
     exec_time += omp_get_wtime();
     fprintf(stderr, "%.1fs\n", exec_time);
    
