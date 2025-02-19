@@ -142,117 +142,42 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *g
 }
 
 
-void particles_by_cell(particle_t *particles, long long n_part, 
-    cell_t *grid_center_of_mass, long ncside, double cell_side, 
-    particle_t **particles_per_cell, long *cell_offsets) {
-
-    // Compute initial cell offsets (starting index in particles_per_cell)
+void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, long cell_side, particle_t **particles_per_cell, long *cell_offsets) {
     cell_offsets[0] = 0;
     for (long i = 1; i < ncside * ncside; i++) {
-        cell_offsets[i] = cell_offsets[i - 1] + grid_center_of_mass[i - 1].n_particles;
+        cell_offsets[i] = cell_offsets[i-1] + grid_center_of_mass[i-1].n_particles;
     }
 
-    // Store a copy of initial offsets for later reference
-    long *initial_offsets = (long *)malloc(ncside * ncside * sizeof(long));
-    if (!initial_offsets) {
-        printf("Memory allocation failed\n");
-        return;
-    }
-    memcpy(initial_offsets, cell_offsets, ncside * ncside * sizeof(long));
-
-    // Sort particles into particles_per_cell and update cell_offsets
+    // Sort particles by cell
     for (long long i = 0; i < n_part; i++) {
-        long x = (long)(particles[i].x / cell_side);
-        long y = (long)(particles[i].y / cell_side);
+        
+        long x = particles[i].x / cell_side;
+        long y = particles[i].y / cell_side;
+
         long cell_index = y * ncside + x;
-
-        printf("row = %ld, col = %ld, cell index = %ld\n", y, x, cell_index);
-
         long offset = cell_offsets[cell_index];
         particles_per_cell[offset] = &particles[i];
-
         cell_offsets[cell_index]++;
     }
-
-    // Restore cell_offsets to point to **starting positions**
-    memcpy(cell_offsets, initial_offsets, ncside * ncside * sizeof(long));
-
-    free(initial_offsets);
 }
 
 
 void remove_particle(particle_t *particles, long long *n_part, 
-    particle_t **particles_per_cell, long *cell_offsets, 
-    long ncside, double cell_side, long index_to_remove) {
+    long index_to_remove) {
 
     if (index_to_remove < 0 || index_to_remove >= *n_part) {
         printf("Invalid index for removal\n");
         return;
     }
 
-    // Get the particle to remove
-    particle_t *particle_to_remove = &particles[index_to_remove];
-    printf("particle's coordinates: %lf %lf\n", particle_to_remove->x, particle_to_remove->y);
-
-    // Find the cell of the particle
-    long x = particle_to_remove->x / cell_side;
-    long y = particle_to_remove->y / cell_side;
-    long cell_index = y * ncside + x;
-    printf("cell_index = %ld\n", cell_index);
-
-    // Find the particle's position in particles_per_cell
-    long start_offset = cell_offsets[cell_index];
-    long end_offset = (cell_index + 1 < ncside * ncside) ? cell_offsets[cell_index + 1] : *n_part;
-    printf("start_offset = %ld, end_offset = %ld\n", start_offset, end_offset);
-
-    long pos_in_particles_per_cell = -1;
-    for (long i = start_offset; i < end_offset; i++) {
-        if (particles_per_cell[i] == particle_to_remove) {
-            pos_in_particles_per_cell = i;
-            break;
-        }
-    }
-
-    if (pos_in_particles_per_cell == -1) {
-        printf("Particle not found in particles_per_cell\n");
-        return;
-    }
-
-    // Remove from particles_per_cell by shifting left
-    for (long i = pos_in_particles_per_cell; i < end_offset - 1; i++) {
-        particles_per_cell[i] = particles_per_cell[i + 1];
-    }
-
-    // Update cell_offsets for affected cells
-    for (long i = cell_index + 1; i < ncside * ncside; i++) {
-        cell_offsets[i]--;
-    }
-
-    // Swap with last particle in particles array (if not last already)
+    // Swap with last particle in the array (if not last already)
     if (index_to_remove != *n_part - 1) {
         particles[index_to_remove] = particles[*n_part - 1];
-
-        // Update the swapped particle's reference in particles_per_cell
-        particle_t *moved_particle = &particles[index_to_remove];
-        long moved_x = moved_particle->x / cell_side;
-        long moved_y = moved_particle->y / cell_side;
-        long moved_cell_index = moved_y * ncside + moved_x;
-
-        // Find the old reference in particles_per_cell and update it
-        long moved_start_offset = cell_offsets[moved_cell_index];
-        long moved_end_offset = (moved_cell_index + 1 < ncside * ncside) ? cell_offsets[moved_cell_index + 1] : *n_part;
-        for (long i = moved_start_offset; i < moved_end_offset; i++) {
-            if (particles_per_cell[i] == &particles[*n_part - 1]) {
-                particles_per_cell[i] = moved_particle;
-                break;
-            }
-        }
     }
 
-    // Reduce the particle count
+    // Reduce the total particle count
     (*n_part)--;
 }
-
 
 
 int main(int argc, char **argv)
@@ -300,11 +225,7 @@ int main(int argc, char **argv)
 
         calculate_center_of_mass(particles, n_part, grid_center_of_mass, ncside, cell_side, seed);
         particles_by_cell(particles, n_part, grid_center_of_mass, ncside, cell_side, particles_per_cell, cell_offsets);
-        printf("---\n");
-        for (long long i = 0; i < n_part; i++) {
-            printf("%lf %lf %lf %lf %lf\n", particles_per_cell[i]->x, particles_per_cell[i]->y, particles_per_cell[i]->vx, particles_per_cell[i]->vy, particles_per_cell[i]->m);
-        }
-        remove_particle(particles, &n_part, particles_per_cell, cell_offsets, ncside, cell_side, 4);
+        remove_particle(particles, &n_part, 5);
         // TODO: Iterate over each particle and calculate the force for x and y of each particle with the particles in the same cell and the 8 adjacent cells
         // TODO: Update the position of each particle, maybe this part can be done in the same loop as the previous one
         // TODO: Check collisions and remove particles if necessary
