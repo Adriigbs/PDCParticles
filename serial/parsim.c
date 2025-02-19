@@ -17,7 +17,7 @@
 
 typedef struct {
     double x, y;
-    long long m;
+    double m;
     long long n_particles;
 } cell_t;
 
@@ -113,7 +113,9 @@ void update_particles(particle_t *particles, long long n_part, cell_t *grid_cent
 
 
 // Calculate the center of mass of each cell
-void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, long cell_side, long seed) {
+void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, double cell_side, long seed) {
+
+    printf("Cell side: %ld\n", cell_side);
 
     for(long long i = 0; i < n_part; i++) {
 
@@ -122,6 +124,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *g
         long y = particles[i].y / cell_side;
 
         // Sum the mass and position of the particle to the cell
+        printf("Particle is on cell %ld \n", y * ncside + x);
         grid_center_of_mass[y*ncside + x].x += particles[i].x * particles[i].m;
         grid_center_of_mass[y*ncside + x].y += particles[i].y * particles[i].m;
         grid_center_of_mass[y*ncside + x].m += particles[i].m;
@@ -152,7 +155,7 @@ void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_cen
 
     // Sort particles by cell
     for (long long i = 0; i < n_part; i++) {
-        
+
         long x = particles[i].x / cell_side;
         long y = particles[i].y / cell_side;
 
@@ -175,7 +178,7 @@ int main(int argc, char **argv)
     long long n_part;
     long time_steps;
     
-    long cell_side;
+    double cell_side;
 
     // Parse arguments from command line
     parse_args(argc, argv, &seed, &side, &ncside, &n_part, &time_steps);
@@ -184,7 +187,7 @@ int main(int argc, char **argv)
     cell_t *grid_center_of_mass = (cell_t*) calloc(ncside * ncside, sizeof(cell_t));
 
     // Calculate the side size of each cell
-    cell_side = side / ncside;
+    cell_side = (double) side / ncside;
 
     // print args  REMOVE BEFORE SUBMISSION
     printf("%ld %lf %ld %lld %ld\n", seed, side, ncside, n_part, time_steps);
@@ -211,10 +214,11 @@ int main(int argc, char **argv)
 
         calculate_center_of_mass(particles, n_part, grid_center_of_mass, ncside, cell_side, seed);
         particles_by_cell(particles, n_part, grid_center_of_mass, ncside, cell_side, particles_per_cell, cell_offsets);
-        // TODO: Iterate over each particle and calculate the force for x and y of each particle with the particles in the same cell and the 8 adjacent cells
-        // TODO: Update the position of each particle, maybe this part can be done in the same loop as the previous one
-        // TODO: Check collisions and remove particles if necessary
-        // TODO: Update cells
+        // Print center of mass of each cell
+        for (long i = 0; i < ncside * ncside; i++) {
+            // print Cell i x: y: m:
+            printf("Cell %ld x: %.3lf y: %.3lf m: %.3lf\n", i, grid_center_of_mass[i].x, grid_center_of_mass[i].y, grid_center_of_mass[i].m);
+        }
 
     //}
     
