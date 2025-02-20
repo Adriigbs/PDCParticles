@@ -165,6 +165,41 @@ void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_cen
 
 }
 
+long detect_collisions(particle_t *particles, long long *n_part, 
+                       particle_t **particles_per_cell, long *cell_offsets, long ncside) {
+    long collisions = 0;
+
+    // Loop through each cell
+    for (long cell_index = 0; cell_index < ncside * ncside; cell_index++) {
+        long start = cell_offsets[cell_index];
+        long end;
+        if (cell_index == ncside * ncside - 1) {
+            end = *n_part;
+        } else {
+            end = cell_offsets[cell_index + 1];
+        }
+    
+
+        // Check only particles within the same cell
+        for (long long i = start; i < end; i++) {
+            for (long long j = i + 1; j < end; j++) {
+                double dx = particles_per_cell[i]->x - particles_per_cell[j]->x;
+                double dy = particles_per_cell[i]->y - particles_per_cell[j]->y;
+                double distance_squared = dx * dx + dy * dy;
+                double distance = sqrt(distance_squared);
+
+                if (distance < EPSILON) {  // Collision detected
+                    printf("[Collision] P%lld/P%lld Distance: %lf\n", i, j, distance);
+                    collisions++;
+                }
+            }
+        }
+    }
+    return collisions;
+}
+
+
+
 
 int main(int argc, char **argv)
 {
@@ -195,9 +230,10 @@ int main(int argc, char **argv)
     particle_t *particles = (particle_t*) malloc(n_part * sizeof(particle_t));
     init_particles(seed, side, ncside, n_part, particles);
 
-    for (long long i = 0; i < n_part; i++) {
+    /*for (long long i = 0; i < n_part; i++) {
         printf("%lf %lf %lf %lf %lf\n", particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].m);
-    }
+    }*/
+    
 
 
     exec_time = -omp_get_wtime();
@@ -211,6 +247,9 @@ int main(int argc, char **argv)
 
         calculate_center_of_mass(particles, n_part, grid_center_of_mass, ncside, cell_side, seed);
         particles_by_cell(particles, n_part, grid_center_of_mass, ncside, cell_side, particles_per_cell, cell_offsets);
+        long collisions = detect_collisions(particles, &n_part, particles_per_cell, cell_offsets, ncside);
+        printf("%ld x %ld y\n", particles[0].x, particles[0].y);
+        printf("%ld collision\n", collisions);
         // TODO: Iterate over each particle and calculate the force for x and y of each particle with the particles in the same cell and the 8 adjacent cells
         // TODO: Update the position of each particle, maybe this part can be done in the same loop as the previous one
         // TODO: Check collisions and remove particles if necessary
