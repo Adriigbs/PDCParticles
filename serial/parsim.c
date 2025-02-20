@@ -39,7 +39,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 
 
 
-void update_particles(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, particle_t **particles_per_cell, long *cell_offsets, long ncside, long cell_side) {
+void update_particles(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, particle_t **particles_per_cell, long *cell_offsets, long ncside, double cell_side) {
 
     for (long long i = 0; i < n_part; i++) {
 
@@ -47,45 +47,56 @@ void update_particles(particle_t *particles, long long n_part, cell_t *grid_cent
         long y = particles[i].y / cell_side;
 
         long particle_cell_index = y * ncside + x;
-
         double force_x = 0.0;
         double force_y = 0.0;
 
         // Add force from other cells
-        for (long i = 0; i < ncside; i++) {
-            for (long j = 0; j < ncside; j++) {
+        for (long j = 0; j < ncside; j++) {
+            for (long k = 0; k < ncside; k++) {
 
-                long cell_index = i * ncside + j;
+                
 
+                long cell_index = j * ncside + k;
+                
                 if (particle_cell_index != cell_index) {
-                    
-                    long distance_x = grid_center_of_mass[cell_index].x - particles[i].x;
-                    long distance_y = grid_center_of_mass[cell_index].y - particles[i].y;
-                    long distance = sqrt(distance_x * distance_x + distance_y * distance_y);
 
+                    // Print particle and cell coordinates
+                    if (i == 0) {
+                        printf("Px: %lf Py: %lf Cx: %lf Cy: %lf\n", particles[i].x, particles[i].y, grid_center_of_mass[cell_index].x, grid_center_of_mass[cell_index].y);
+                    }
+                    
+                    double distance_x = grid_center_of_mass[cell_index].x - particles[i].x;
+                    double distance_y = grid_center_of_mass[cell_index].y - particles[i].y;
+                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y);
+                    
+                    
                     force_x += GRAV_FORCE(particles[i].m, grid_center_of_mass[cell_index].m, distance) * (distance_x / distance);
                     force_y += GRAV_FORCE(particles[i].m, grid_center_of_mass[cell_index].m, distance) * (distance_y / distance);
-
+                    
+                    if (i == 0) {
+                        printf("P%lld/C%ld mag: %.3lf fx: %.3lf fy: %.3lf\n", i, cell_index, distance, force_x, force_y);
+                    }
+                    
                 }
                 
             }
         }
-
+        
         // Add force from particles in the same cell
         long starting_index = cell_offsets[particle_cell_index] - grid_center_of_mass[particle_cell_index].n_particles;
 
+        
         for (starting_index; starting_index < grid_center_of_mass[particle_cell_index].n_particles; starting_index++) {
-
-            long distance_x = particles_per_cell[starting_index]->x - particles[i].x;
-            long distance_y = particles_per_cell[starting_index]->y - particles[i].y;
-            long distance = sqrt(distance_x * distance_x + distance_y * distance_y);
-
+            
+            double distance_x = particles_per_cell[starting_index]->x - particles[i].x;
+            double distance_y = particles_per_cell[starting_index]->y - particles[i].y;
+            double distance = sqrt(distance_x * distance_x + distance_y * distance_y);
+            
             force_x += GRAV_FORCE(particles[i].m, particles_per_cell[starting_index]->m, distance) * (distance_x / distance);
             force_y += GRAV_FORCE(particles[i].m, particles_per_cell[starting_index]->m, distance) * (distance_y / distance);
-
+            
         }
-
-
+        
         particles[i].gravity_x = force_x;
         particles[i].gravity_y = force_y;
 
@@ -115,8 +126,6 @@ void update_particles(particle_t *particles, long long n_part, cell_t *grid_cent
 // Calculate the center of mass of each cell
 void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, double cell_side, long seed) {
 
-    printf("Cell side: %ld\n", cell_side);
-
     for(long long i = 0; i < n_part; i++) {
 
         // Calculate the cell in which the particle is located
@@ -124,7 +133,6 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *g
         long y = particles[i].y / cell_side;
 
         // Sum the mass and position of the particle to the cell
-        printf("Particle is on cell %ld \n", y * ncside + x);
         grid_center_of_mass[y*ncside + x].x += particles[i].x * particles[i].m;
         grid_center_of_mass[y*ncside + x].y += particles[i].y * particles[i].m;
         grid_center_of_mass[y*ncside + x].m += particles[i].m;
@@ -146,7 +154,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, cell_t *g
 }
 
 
-void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, long cell_side, particle_t **particles_per_cell, long *cell_offsets) {
+void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_center_of_mass, long ncside, double cell_side, particle_t **particles_per_cell, long *cell_offsets) {
 
     cell_offsets[0] = 0;
     for (long i = 1; i < ncside * ncside; i++) {
@@ -158,7 +166,7 @@ void particles_by_cell(particle_t *particles, long long n_part, cell_t *grid_cen
 
         long x = particles[i].x / cell_side;
         long y = particles[i].y / cell_side;
-
+        
         long cell_index = y * ncside + x;
         long offset = cell_offsets[cell_index];
         particles_per_cell[offset] = &particles[i];
@@ -219,6 +227,7 @@ int main(int argc, char **argv)
             // print Cell i x: y: m:
             printf("Cell %ld x: %.3lf y: %.3lf m: %.3lf\n", i, grid_center_of_mass[i].x, grid_center_of_mass[i].y, grid_center_of_mass[i].m);
         }
+        update_particles(particles, n_part, grid_center_of_mass, particles_per_cell, cell_offsets, ncside, cell_side);
 
     //}
     
