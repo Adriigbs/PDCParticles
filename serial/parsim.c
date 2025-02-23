@@ -34,21 +34,54 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
     *ncside = atol(argv[3]);
     *n_part = atoll(argv[4]);
     *n_steps = atol(argv[5]);
-    
-    
+}
+
+
+void reset_grid(long ncside, cell_t grid[][ncside]) {
+    for (long i = 0; i < ncside; i++) {
+        for (long j = 0; j < ncside; j++) {
+            grid[i][j].m = 0.0;
+            grid[i][j].x = 0.0;
+            grid[i][j].y = 0.0;
+            grid[i][j].n_particles = 0;
+            grid[i][j].index = 0;
+            grid[i][j].particles = NULL;
+        }
+    }
+}
+
+
+void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
+
+    for (long long i = 0; i < n_part; i++) {
+
+        long x = particles[i].x / cell_side;
+        long y = particles[i].y / cell_side;
+
+        if (x >= ncside) x = ncside - 1;
+        if (y >= ncside) y = ncside - 1;
+
+        grid[y][x].particles[grid[y][x].index] = &particles[i];
+        grid[y][x].index++;
+        
+    }
 
 }
 
 
-
 // Calculate the center of mass of each cell
 void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, long seed) {
+
+    reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
     for(long long i = 0; i < n_part; i++) {
 
         // Calculate the cell in which the particle is located
         long x = particles[i].x / cell_side;
         long y = particles[i].y / cell_side;
+
+        if (x >= ncside) x = ncside - 1;
+        if (y >= ncside) y = ncside - 1;
 
         // Sum the mass and position of the particle to the cell
         grid[y][x].m += particles[i].m;
@@ -66,32 +99,115 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
                 grid[i][j].m = 0;
                 grid[i][j].x = 0;
                 grid[i][j].y = 0;
-                continue;
+            } else {
+                grid[i][j].index = 0;
+                grid[i][j].x /= grid[i][j].m;
+                grid[i][j].y /= grid[i][j].m;
+                // malloc or realloc?
+                grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
+                // set grid[i][j].particles to NULL?
             }
-
-            grid[i][j].index = 0;
-            grid[i][j].x /= grid[i][j].m;
-            grid[i][j].y /= grid[i][j].m;
-            grid[i][j].particles = (particle_t**) malloc(grid[i][j].n_particles * sizeof(particle_t*));
         }
     }
-    
+
+    split_particles_by_cell(particles, n_part, ncside, grid, cell_side);
 }
 
-
-void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, particle_t **particles_per_cell) {
+void update_particles(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
 
     for (long long i = 0; i < n_part; i++) {
 
         long x = particles[i].x / cell_side;
         long y = particles[i].y / cell_side;
 
-        grid[y][x].particles[grid[y][x].index] = &particles[i];
-        grid[y][x].index++;
+        double force_x = 0.0;
+        double force_y = 0.0;
+
+        // Add force from neighboring cells
+        for (long dx = -1; dx <= 1; dx++) {
+            for (long dy = -1; dy <= 1; dy++) {
+
+                if (dx == 0 && dy == 0) continue; // skip own cell
+
+                long nx = (x + dx + ncside) % ncside; // Wrap around edges
+                long ny = (y + dy + ncside) % ncside;
+
+                long cell_index = ny * ncside + nx;
+
+                cell_t *neighbor_cell = &grid[ny][nx];
+
+                if (neighbor_cell->m == 0) continue; // Skip empty cells
+
+                // Compute force from center of mass of the cell
+                double distance_x = neighbor_cell->x - particles[i].x;
+                double distance_y = neighbor_cell->y - particles[i].y;
+                double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
+                
+                force_x += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_x / distance);
+                force_y += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_y / distance);
+
+                if (i == 0) {
+                    printf("P%lld/C%ld mag: %.3lf fx: %.3lf fy: %.3lf\n", i, cell_index, distance, force_x, force_y);
+                }
+            }
+        }
         
+        // Add force from particles in the same cell
+        cell_t *current_cell = &grid[y][x];
+        
+        for (long j = 0; j < current_cell->n_particles; j++) {
+            if (current_cell->particles[j] == &particles[i]) continue;
+
+            double distance_x = current_cell->particles[j]->x - particles[i].x;
+            double distance_y = current_cell->particles[j]->y - particles[i].y;
+            double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
+
+            force_x += GRAV_FORCE(particles[i].m, current_cell->particles[j]->m, distance) * (distance_x / distance);
+            force_y += GRAV_FORCE(particles[i].m, current_cell->particles[j]->m, distance) * (distance_y / distance);
+
+            if (i == 0) {
+                printf("P%lld/P%ld mag: %.3lf fx: %.3lf fy: %.3lf\n", i, j, distance, force_x, force_y);
+            }
+        }
+
+        particles[i].gravity_x = force_x;
+        particles[i].gravity_y = force_y;
+    }
+
+    // Update position and speed of particles
+    for (long long i = 0; i < n_part; i++) {
+
+        long acceleration_x = particles[i].gravity_x / particles[i].m;
+        long acceleration_y = particles[i].gravity_y / particles[i].m;
+
+
+        // Update position
+        particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
+        particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
+
+        // Update speed
+        particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
+        particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
+
+        // Wrap-around on x
+        if (particles[i].x < 0) {
+            particles[i].x += side;
+        }
+        else if (particles[i].x >= side) {
+            particles[i].x -= side;
+        }
+    
+        // Apply wraparound on y
+        if (particles[i].y < 0) {
+            particles[i].y += side;
+        }
+        else if (particles[i].y >= side) {
+            particles[i].y -= side;
+        }
     }
 
 }
+
 
 void print_particles_and_cells(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside]) {
     // Print particles
@@ -139,15 +255,28 @@ int main(int argc, char **argv)
 
     exec_time = -omp_get_wtime();
     
-    // Calculate the center of mass of each cell
-    calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
-    print_particles_and_cells(particles, n_part, ncside, grid);
+    for (long i = 0; i < time_steps; i++) {
+        printf("--- STARTING TIMESTEP %ld ---\n", i);
 
+        // Calculate the center of mass of each cell
+        calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+        print_particles_and_cells(particles, n_part, ncside, grid);
+        update_particles(particles, n_part, ncside, grid, cell_side, side);
 
+    }
+
+    printf("%.3lf %.3lf\n", particles[0].x, particles[0].y);
+
+    free(particles);
+    for (long i = 0; i < ncside; i++) {
+        for (long j = 0; j < ncside; j++) {
+            free(grid[i][j].particles);
+        }
+    }
     
     exec_time += omp_get_wtime();
     fprintf(stderr, "%.1fs\n", exec_time);
-   
 
+   
     return 0;
 }
