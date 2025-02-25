@@ -127,6 +127,9 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
         for (long dx = -1; dx <= 1; dx++) {
             for (long dy = -1; dy <= 1; dy++) {
 
+                force_x = 0.0;
+                force_y = 0.0;
+
                 if (dx == 0 && dy == 0) continue; // skip own cell
 
                 long nx = (x + dx + ncside) % ncside; // Wrap around edges
@@ -147,7 +150,7 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
                 force_y += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_y / distance);
 
                 if (i == 0) {
-                    //printf("P%lld/C%ld mag: %.3lf fx: %.3lf fy: %.3lf\n", i, cell_index, distance, force_x, force_y);
+                    //printf("P%lld/C%ld mag: %.6lf fx: %.6lf fy: %.6lf\n", i, cell_index, distance, force_x, force_y);
                 }
             }
         }
@@ -276,7 +279,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
 void print_particles_and_cells(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside]) {
     // Print particles
     for (long long i = 0; i < n_part; i++) {
-        printf("Particle %lld: mass=%.3f x=%.3f y=%.3f vx=%.3f vy=%.3f\n",
+        printf("Particle %lld: mass=%.6f x=%.6f y=%.6f vx=%.6f vy=%.6f\n",
                i, particles[i].m, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
     }
 
@@ -284,7 +287,7 @@ void print_particles_and_cells(particle_t *particles, long long n_part, long ncs
     long cell_index = 0;
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
-            printf("Cell %ld x: %.3f y: %.3f m: %.3f\n",
+            printf("Cell %ld x: %.6f y: %.6f m: %.6f\n",
                    cell_index, grid[i][j].x, grid[i][j].y, grid[i][j].m);
             cell_index++;
         }
@@ -321,7 +324,7 @@ int main(int argc, char **argv)
     exec_time = -omp_get_wtime();
     
     for (long i = 0; i < time_steps; i++) {
-        //printf("t=%ld\n", i);
+        printf("t=%ld\n", i);
 
         // Calculate the center of mass of each cell
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
