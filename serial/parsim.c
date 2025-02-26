@@ -132,7 +132,7 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
                 long nx = (x + dx + ncside) % ncside; // Wrap around edges
                 long ny = (y + dy + ncside) % ncside;
 
-                long cell_index = ny * ncside + nx;
+                //long cell_index = ny * ncside + nx;
 
                 cell_t *neighbor_cell = &grid[ny][nx];
 
@@ -141,8 +141,14 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
                 // Compute force from center of mass of the cell
                 double distance_x = neighbor_cell->x - particles[i].x;
                 double distance_y = neighbor_cell->y - particles[i].y;
-                double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
-                
+
+                if (x + dx >= ncside) distance_x += side;
+                if (x + dx < 0) distance_x -= side;
+                if (y + dy >= ncside) distance_y += side;
+                if (y + dy < 0) distance_y -= side;
+
+                double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // avoid division by zero
+
                 force_x += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_x / distance);
                 force_y += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_y / distance);
 
