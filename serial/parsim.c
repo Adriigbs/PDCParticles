@@ -127,9 +127,6 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
         for (long dx = -1; dx <= 1; dx++) {
             for (long dy = -1; dy <= 1; dy++) {
 
-                force_x = 0.0;
-                force_y = 0.0;
-
                 if (dx == 0 && dy == 0) continue; // skip own cell
 
                 long nx = (x + dx + ncside) % ncside; // Wrap around edges
@@ -323,14 +320,16 @@ int main(int argc, char **argv)
 
     exec_time = -omp_get_wtime();
     
+    calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+
     for (long i = 0; i < time_steps; i++) {
-        printf("t=%ld\n", i);
+        //printf("t=%ld\n", i);
 
         // Calculate the center of mass of each cell
-        calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         //print_particles_and_cells(particles, n_part, ncside, grid);
-        total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         update_particles(particles, n_part, ncside, grid, cell_side, side);
+        calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+        total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
     }
 
     printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
