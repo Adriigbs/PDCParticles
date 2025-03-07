@@ -115,10 +115,17 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 
 void update_particles(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
 
+    // iterar de cell em cell tem menos cache misses
+
+    #pragma omp for
     for (long long i = 0; i < n_part; i++) {
 
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
+        double px = particles[i].x;
+        double py = particles[i].y;
+        double pm = particles[i].m;
+
+        long x = px / cell_side;
+        long y = py / cell_side;
 
         double force_x = 0.0;
         double force_y = 0.0;
@@ -132,15 +139,13 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
                 long nx = (x + dx + ncside) % ncside; // Wrap around edges
                 long ny = (y + dy + ncside) % ncside;
 
-                //long cell_index = ny * ncside + nx;
-
                 cell_t *neighbor_cell = &grid[ny][nx];
 
                 if (neighbor_cell->m == 0) continue; // Skip empty cells
 
                 // Compute force from center of mass of the cell
-                double distance_x = neighbor_cell->x - particles[i].x;
-                double distance_y = neighbor_cell->y - particles[i].y;
+                double distance_x = neighbor_cell->x - px;
+                double distance_y = neighbor_cell->y - py;
 
                 if (x + dx >= ncside) distance_x += side;
                 if (x + dx < 0) distance_x -= side;
@@ -149,8 +154,8 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
 
                 double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // avoid division by zero
 
-                force_x += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_x / distance);
-                force_y += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_y / distance);
+                force_x += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_x / distance);
+                force_y += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_y / distance);
 
                 if (i == 0) {
                     //printf("P%lld/C%ld mag: %.6lf fx: %.6lf fy: %.6lf\n", i, cell_index, distance, force_x, force_y);
@@ -164,12 +169,12 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
         for (long j = 0; j < current_cell->n_particles; j++) {
             if (current_cell->particles[j] == &particles[i]) continue;
 
-            double distance_x = current_cell->particles[j]->x - particles[i].x;
-            double distance_y = current_cell->particles[j]->y - particles[i].y;
+            double distance_x = current_cell->particles[j]->x - px;
+            double distance_y = current_cell->particles[j]->y - py;
             double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
 
-            force_x += GRAV_FORCE(particles[i].m, current_cell->particles[j]->m, distance) * (distance_x / distance);
-            force_y += GRAV_FORCE(particles[i].m, current_cell->particles[j]->m, distance) * (distance_y / distance);
+            force_x += GRAV_FORCE(pm, current_cell->particles[j]->m, distance) * (distance_x / distance);
+            force_y += GRAV_FORCE(pm, current_cell->particles[j]->m, distance) * (distance_y / distance);
 
             if (i == 0) {
                 //printf("P%lld/P%ld mag: %.3lf fx: %.3lf fy: %.3lf\n", i, j, distance, force_x, force_y);
@@ -181,6 +186,7 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
     }
 
     // Update position and speed of particles
+    #pragma omp for
     for (long long i = 0; i < n_part; i++) {
 
         double acceleration_x = particles[i].gravity_x / particles[i].m;
@@ -194,21 +200,9 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
         particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
         particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
 
-        // Wrap-around on x
-        if (particles[i].x < 0) {
-            particles[i].x += side;
-        }
-        else if (particles[i].x >= side) {
-            particles[i].x -= side;
-        }
-    
-        // Apply wraparound on y
-        if (particles[i].y < 0) {
-            particles[i].y += side;
-        }
-        else if (particles[i].y >= side) {
-            particles[i].y -= side;
-        }
+        // Wrap-around
+        particles[i].x = fmod(particles[i].x + side, side);
+        particles[i].y = fmod(particles[i].y + side, side);
     }
 
 }
@@ -234,9 +228,11 @@ void remove_particle(particle_t *particles, long long *n_part,
 
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
+    long j = 0;
 
+    #pragma omp for private(j) // slightly faster
     for (long i = 0; i < ncside; i++) {
-        for (long j = 0; j < ncside; j++) {
+        for (j = 0; j < ncside; j++) {
 
             cell_t *cell = &grid[i][j];
 
@@ -313,6 +309,8 @@ int main(int argc, char **argv)
     // Parse arguments from command line
     parse_args(argc, argv, &seed, &side, &ncside, &n_part, &time_steps);
 
+    omp_set_num_threads(omp_get_max_threads());
+
     
     // Calculate the side size of each cell
     cell_side = (double) side / ncside;
@@ -326,17 +324,25 @@ int main(int argc, char **argv)
 
     exec_time = -omp_get_wtime();
     
+    // can make timesteps loop inside parallel section by making "i" private?
+    
     calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
 
-    for (long i = 0; i < time_steps; i++) {
-        //printf("t=%ld\n", i);
-
-        // Calculate the center of mass of each cell
-        //print_particles_and_cells(particles, n_part, ncside, grid);
-        update_particles(particles, n_part, ncside, grid, cell_side, side);
-        calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
-        total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+    #pragma omp parallel
+    {
+        for (long i = 0; i < time_steps; i++) {
+            //printf("t=%ld\n", i);
+    
+            // Calculate the center of mass of each cell
+            //print_particles_and_cells(particles, n_part, ncside, grid);
+            update_particles(particles, n_part, ncside, grid, cell_side, side);
+            #pragma omp single
+            calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+            total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+        }
     }
+
+
 
     printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 

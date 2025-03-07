@@ -6,7 +6,7 @@ CFLAGS = -O2 -fopenmp
 TARGET = parsim
 
 # Source and header files
-SRCS = parsim.c init_particles.c
+SRCS = parsim-omp.c init_particles.c
 HEADERS = init_particles.h
 OBJS = $(SRCS:.c=.o)
 
