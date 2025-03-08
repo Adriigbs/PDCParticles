@@ -115,99 +115,101 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 
 void update_particles(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
 
-    for (long long i = 0; i < n_part; i++) {
+    // Iterate over every cell
+    for (long x = 0; x < ncside; x++) {
+        for (long y = 0; y < ncside; y++) {
+            
+            cell_t *cell = &grid[y][x];
+            particle_t **particles = cell->particles;
 
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
+            // Iterate over every particle from each cell
+            for (long long i = 0; i < cell->n_particles; i++) {
 
-        double force_x = 0.0;
-        double force_y = 0.0;
+                double px = particles[i]->x;
+                double py = particles[i]->y;
+                double pm = particles[i]->m;
 
-        // Add force from neighboring cells
-        for (long dx = -1; dx <= 1; dx++) {
-            for (long dy = -1; dy <= 1; dy++) {
+                double force_x = 0.0;
+                double force_y = 0.0;
 
-                if (dx == 0 && dy == 0) continue; // skip own cell
+                // Add force from other particles in the same cell
+                for (long long j = 0; j < cell->n_particles; j++) {
 
-                long nx = (x + dx + ncside) % ncside; // Wrap around edges
-                long ny = (y + dy + ncside) % ncside;
+                    if (i == j) continue;
 
-                //long cell_index = ny * ncside + nx;
+                    double distance_x = cell->particles[j]->x - px;
+                    double distance_y = cell->particles[j]->y - py;
+                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
 
-                cell_t *neighbor_cell = &grid[ny][nx];
+                    force_x += GRAV_FORCE(pm, cell->particles[j]->m, distance) * (distance_x / distance);
+                    force_y += GRAV_FORCE(pm, cell->particles[j]->m, distance) * (distance_y / distance);
 
-                if (neighbor_cell->m == 0) continue; // Skip empty cells
-
-                // Compute force from center of mass of the cell
-                double distance_x = neighbor_cell->x - particles[i].x;
-                double distance_y = neighbor_cell->y - particles[i].y;
-
-                if (x + dx >= ncside) distance_x += side;
-                if (x + dx < 0) distance_x -= side;
-                if (y + dy >= ncside) distance_y += side;
-                if (y + dy < 0) distance_y -= side;
-
-                double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // avoid division by zero
-
-                force_x += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_x / distance);
-                force_y += GRAV_FORCE(particles[i].m, neighbor_cell->m, distance) * (distance_y / distance);
-
-                if (i == 0) {
-                    //printf("P%lld/C%ld mag: %.6lf fx: %.6lf fy: %.6lf\n", i, cell_index, distance, force_x, force_y);
                 }
+
+                // Add force from neighboring cells
+                for (long dx = -1; dx <= 1; dx++) {
+                    for (long dy = -1; dy <= 1; dy++) {
+
+                        if (dx == 0 && dy == 0) continue; // skip own cell
+
+                        long nx = (x + dx + ncside) % ncside; // Wrap around edges
+                        long ny = (y + dy + ncside) % ncside;
+
+                        cell_t *neighbor_cell = &grid[ny][nx];
+
+                        // Compute force from center of mass of the cell
+                        double distance_x = neighbor_cell->x - px;
+                        double distance_y = neighbor_cell->y - py;
+
+                        if (x + dx >= ncside) distance_x += side;
+                        if (x + dx < 0) distance_x -= side;
+                        if (y + dy >= ncside) distance_y += side;
+                        if (y + dy < 0) distance_y -= side;
+
+                        double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // avoid division by zero
+
+                        force_x += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_x / distance);
+                        force_y += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_y / distance);
+
+                        if (i == 0) {
+                            //printf("P%lld/C%ld mag: %.6lf fx: %.6lf fy: %.6lf\n", i, cell_index, distance, force_x, force_y);
+                        }
+                    }
+                }
+
+                particles[i]->gravity_x = force_x;
+                particles[i]->gravity_y = force_y;
             }
-        }
-        
-        // Add force from particles in the same cell
-        cell_t *current_cell = &grid[y][x];
-        
-        for (long j = 0; j < current_cell->n_particles; j++) {
-            if (current_cell->particles[j] == &particles[i]) continue;
 
-            double distance_x = current_cell->particles[j]->x - particles[i].x;
-            double distance_y = current_cell->particles[j]->y - particles[i].y;
-            double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
-
-            force_x += GRAV_FORCE(particles[i].m, current_cell->particles[j]->m, distance) * (distance_x / distance);
-            force_y += GRAV_FORCE(particles[i].m, current_cell->particles[j]->m, distance) * (distance_y / distance);
-
-            if (i == 0) {
-                //printf("P%lld/P%ld mag: %.3lf fx: %.3lf fy: %.3lf\n", i, j, distance, force_x, force_y);
-            }
         }
 
-        particles[i].gravity_x = force_x;
-        particles[i].gravity_y = force_y;
     }
 
     // Update position and speed of particles
-    for (long long i = 0; i < n_part; i++) {
+    for (long x = 0; x < ncside; x++) {
+        for (long y = 0; y < ncside; y++) {
 
-        double acceleration_x = particles[i].gravity_x / particles[i].m;
-        double acceleration_y = particles[i].gravity_y / particles[i].m;
+            cell_t *cell = &grid[y][x];
+            particle_t **particles = cell->particles;
 
-        // Update position
-        particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
-        particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
+            // Iterate over every particle from each cell
+            for (long long i = 0; i < cell->n_particles; i++) {
 
-        // Update speed
-        particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
-        particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
-
-        // Wrap-around on x
-        if (particles[i].x < 0) {
-            particles[i].x += side;
-        }
-        else if (particles[i].x >= side) {
-            particles[i].x -= side;
-        }
+                double acceleration_x = particles[i]->gravity_x / particles[i]->m;
+                double acceleration_y = particles[i]->gravity_y / particles[i]->m;
     
-        // Apply wraparound on y
-        if (particles[i].y < 0) {
-            particles[i].y += side;
-        }
-        else if (particles[i].y >= side) {
-            particles[i].y -= side;
+                // Update position
+                particles[i]->x = POSITION(particles[i]->x, particles[i]->vx, acceleration_x, DELTA);
+                particles[i]->y = POSITION(particles[i]->y, particles[i]->vy, acceleration_y, DELTA);
+    
+                // Update speed
+                particles[i]->vx = SPEED(particles[i]->vx, acceleration_x, DELTA);
+                particles[i]->vy = SPEED(particles[i]->vy, acceleration_y, DELTA);
+    
+                // Wrap-around
+                particles[i]->x = fmod(particles[i]->x + side, side);
+                particles[i]->y = fmod(particles[i]->y + side, side);
+            }  
         }
     }
 
