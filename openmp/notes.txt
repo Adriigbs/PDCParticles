@@ -1,0 +1,11 @@
+
+
+
+-- UPDATE PARTICLES:
+    -For each particle we can calculate each adjecent cell at the same time (no dependency);
+    -For each particle, calculate forces to multiple particles at the same time;
+    -We can paralelize the caomputation of the new positions and speed
+
+
+-- DETECT COLLISIONS:
+    -We can detect collisions multiple cells at the same time

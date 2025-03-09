@@ -1,12 +1,12 @@
 # Compiler
-CC = gcc
-CFLAGS = -O2 -fopenmp 
+CC = gcc-14
+CFLAGS = -O2 -fopenmp -lm
 
 # Executable name
 TARGET = parsim
 
 # Source and header files
-SRCS = parsim.c init_particles.c
+SRCS = parsim-omp.c init_particles.c
 HEADERS = init_particles.h
 OBJS = $(SRCS:.c=.o)
 
