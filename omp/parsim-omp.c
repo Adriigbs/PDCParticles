@@ -38,6 +38,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 
 
 void reset_grid(long ncside, cell_t grid[][ncside]) {
+    #pragma omp for
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             grid[i][j].m = 0.0;
@@ -53,6 +54,7 @@ void reset_grid(long ncside, cell_t grid[][ncside]) {
 
 void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
 
+    #pragma omp for
     for (long long i = 0; i < n_part; i++) {
 
         long x = particles[i].x / cell_side;
@@ -61,8 +63,11 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
         if (x >= ncside) x = ncside - 1;
         if (y >= ncside) y = ncside - 1;
 
-        grid[y][x].particles[grid[y][x].index] = &particles[i];
-        grid[y][x].index++;
+        #pragma omp critical
+        {
+            grid[y][x].particles[grid[y][x].index] = &particles[i];
+            grid[y][x].index++;
+        }
         
     }
 
@@ -74,6 +79,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 
     reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
+    #pragma omp for
     for(long long i = 0; i < n_part; i++) {
 
         // Calculate the cell in which the particle is located
@@ -84,13 +90,18 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
         if (y >= ncside) y = ncside - 1;
 
         // Sum the mass and position of the particle to the cell
+        #pragma omp atomic
         grid[y][x].m += particles[i].m;
+        #pragma omp atomic
         grid[y][x].x += particles[i].x * particles[i].m;
+        #pragma omp atomic
         grid[y][x].y += particles[i].y * particles[i].m;
+        #pragma omp atomic
         grid[y][x].n_particles++;
         
     }
 
+    #pragma omp for
     // Divide by the number of particles in the cell to get the center of mass
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
@@ -101,11 +112,12 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
                 grid[i][j].y = 0;
             } else {
                 grid[i][j].index = 0;
+                #pragma omp atomic
                 grid[i][j].x /= grid[i][j].m;
+                #pragma omp atomic
                 grid[i][j].y /= grid[i][j].m;
-                // malloc or realloc?
+                #pragma omp critical
                 grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
-                // set grid[i][j].particles to NULL?
             }
         }
     }
@@ -232,17 +244,16 @@ void remove_particle(particle_t *particles, long long *n_part,
     }
 
     // Reduce the total particle count
+    #pragma omp atomic
     (*n_part)--;
 }
 
 
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
-    long j = 0;
 
-    #pragma omp for private(j) // slightly faster
     for (long i = 0; i < ncside; i++) {
-        for (j = 0; j < ncside; j++) {
+        for (long j = 0; j < ncside; j++) {
 
             cell_t *cell = &grid[i][j];
 
@@ -260,7 +271,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                     double distance_squared = dx * dx + dy * dy;
 
                     if (distance_squared < EPSILON * EPSILON) {  // Collision detected
-                        double distance = sqrt(distance_squared);
+                        //double distance = sqrt(distance_squared);
                         //printf("[Collision] P%lld/P%lld Distance: %lf\n", (long long)(particle1 - particles), (long long)(particle2 - particles), distance);
                         collisions++;
 
@@ -344,8 +355,8 @@ int main(int argc, char **argv)
             // Calculate the center of mass of each cell
             //print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
-            #pragma omp single
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+            #pragma omp critical
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
     }
