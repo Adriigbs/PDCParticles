@@ -251,47 +251,76 @@ void remove_particle(particle_t *particles, long long *n_part,
 
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
+    long long *collision_group = (long long *)malloc(*n_part * sizeof(long long));  // Track collision groups
+    for (long long i = 0; i < *n_part; i++) collision_group[i] = -1;  // Initialize all as ungrouped
+
+    int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
-
             cell_t *cell = &grid[i][j];
 
-            if (cell->n_particles < 2) continue;  // No collisions if only 0 or 1 particle
-            long p1 = 0;
-            while (p1 < cell->n_particles) {
-                int removed = 0;  // track if a particle is removed
+            if (cell->n_particles < 2) continue;  // No collisions possible if only 0 or 1 particle
 
+            for (long p1 = 0; p1 < cell->n_particles; p1++) {
                 for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
                     particle_t *particle1 = cell->particles[p1];
                     particle_t *particle2 = cell->particles[p2];
 
                     double dx = particle1->x - particle2->x;
                     double dy = particle1->y - particle2->y;
-                    double distance_squared = dx * dx + dy * dy;
+                    double distance= sqrt(dx * dx + dy * dy) + 1e-10;;
 
-                    if (distance_squared < EPSILON * EPSILON) {  // Collision detected
-                        //double distance = sqrt(distance_squared);
-                        //printf("[Collision] P%lld/P%lld Distance: %lf\n", (long long)(particle1 - particles), (long long)(particle2 - particles), distance);
-                        collisions++;
+                
+
+                    if (distance < EPSILON) {  // Collision detected
+                        long long id1 = (long long)(particle1 - particles);
+                        long long id2 = (long long)(particle2 - particles);
+
+                        // If neither particle is assigned to a group, create a new one
+                        if (collision_group[id1] == -1 && collision_group[id2] == -1) {
+                            collision_group[id1] = collision_group[id2] = collisions;
+                            collisions++;  
+                        } 
+                        // If only one particle has a group, add the particle without group to the group
+                        else if (collision_group[id1] == -1) {
+                            collision_group[id1] = collision_group[id2];
+                        } 
+                        else if (collision_group[id2] == -1) {
+                            collision_group[id2] = collision_group[id1];
+                        } 
+                        // If both particles have different groups, join them into the same group
+                        else if (collision_group[id1] != collision_group[id2]) {
+                            long old_group = collision_group[id2];
+                            for (long long k = 0; k < *n_part; k++) {
+                                if (collision_group[k] == old_group) {
+                                    collision_group[k] = collision_group[id1];
+                                }
+                            }
+                        }
 
                         // Remove both particles
-                        remove_particle(particles, n_part, (long long)(particle2 - particles));
-                        remove_particle(particles, n_part, (long long)(particle1 - particles));
-
-                        // Update particle count in the cell
-                        cell->n_particles -= 2;
-                        removed = 1;
-                        break;  // Restart loop after removal
+                        to_remove[id1] = 1;
+                        to_remove[id2] = 1;
+                    
                     }
-                }
-
-                if (!removed) {
-                    p1++;  // Move to the next particle only if none were removed
                 }
             }
         }
     }
+
+    // Remove particles that collided
+    long new_n = 0;
+    for (long long i = 0; i < *n_part; i++) {
+        if (!to_remove[i]) {
+            particles[new_n] = particles[i];
+            new_n++;
+        }
+    }
+    *n_part = new_n;
+    free(to_remove);
+    
+    free(collision_group);  // Clean up memory
     return collisions;
 }
 
@@ -356,8 +385,13 @@ int main(int argc, char **argv)
             //print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
-            #pragma omp critical
-            total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+            
+
+            # pragma omp critical
+            {
+                total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+            }
+            # pragma omp barrier
         }
     }
 
