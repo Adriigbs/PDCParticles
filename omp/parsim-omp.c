@@ -73,7 +73,6 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
 
 }
 
-
 // Calculate the center of mass of each cell
 void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, long seed) {
 
@@ -128,16 +127,15 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 void update_particles(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
 
     // Iterate over every cell
-    #pragma omp for
+    #pragma omp for collapse(2) //vai juntar os dois for e dividir por celula 
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
             
             cell_t *cell = &grid[y][x];
             particle_t **particles = cell->particles;
-
+            
             // Iterate over every particle from each cell
             for (long long i = 0; i < cell->n_particles; i++) {
-
                 double px = particles[i]->x;
                 double py = particles[i]->y;
                 double pm = particles[i]->m;
@@ -199,7 +197,7 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
     }
 
     // Update position and speed of particles
-    #pragma omp for
+    #pragma omp for collapse(2)
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
 
@@ -234,7 +232,7 @@ void remove_particle(particle_t *particles, long long *n_part,
     long index_to_remove) {
 
     if (index_to_remove < 0 || index_to_remove >= *n_part) {
-        printf("Invalid index for removal\n");
+        printf("Invalid index for removal %lld\n", index_to_remove);
         return;
     }
 
@@ -248,14 +246,15 @@ void remove_particle(particle_t *particles, long long *n_part,
     (*n_part)--;
 }
 
-
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
     long long *collision_group = (long long *)malloc(*n_part * sizeof(long long));  // Track collision groups
-    for (long long i = 0; i < *n_part; i++) collision_group[i] = -1;  // Initialize all as ungrouped
-
     int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
+    for (long long i = 0; i < *n_part; i++) 
+        collision_group[i] = -1;  // Initialize all as ungrouped
+
+    #pragma omp for
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
@@ -266,30 +265,25 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                 for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
                     particle_t *particle1 = cell->particles[p1];
                     particle_t *particle2 = cell->particles[p2];
-
                     double dx = particle1->x - particle2->x;
                     double dy = particle1->y - particle2->y;
-                    double distance= sqrt(dx * dx + dy * dy) + 1e-10;;
-
-                
+                    double distance = sqrt(dx * dx + dy * dy) + 1e-10;
 
                     if (distance < EPSILON) {  // Collision detected
+
                         long long id1 = (long long)(particle1 - particles);
                         long long id2 = (long long)(particle2 - particles);
-
-                        // If neither particle is assigned to a group, create a new one
+                        //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         if (collision_group[id1] == -1 && collision_group[id2] == -1) {
                             collision_group[id1] = collision_group[id2] = collisions;
                             collisions++;  
                         } 
-                        // If only one particle has a group, add the particle without group to the group
                         else if (collision_group[id1] == -1) {
                             collision_group[id1] = collision_group[id2];
                         } 
                         else if (collision_group[id2] == -1) {
                             collision_group[id2] = collision_group[id1];
                         } 
-                        // If both particles have different groups, join them into the same group
                         else if (collision_group[id1] != collision_group[id2]) {
                             long old_group = collision_group[id2];
                             for (long long k = 0; k < *n_part; k++) {
@@ -298,32 +292,32 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                                 }
                             }
                         }
-
-                        // Remove both particles
+                        
+                        // Mark both particles for removal
                         to_remove[id1] = 1;
                         to_remove[id2] = 1;
-                    
                     }
                 }
             }
+
+            // Remove marked particles (loop backward to avoid shifting issues)
+            int removed_count = 0;
+            for (long p = cell->n_particles - 1; p >= 0; p--) {
+                long long id = (long long)(cell->particles[p] - particles);
+                if (to_remove[id]) {
+                    //printf("Removing particle at index: %lld\n", id);  // Debug print
+                    remove_particle(particles, n_part, id);
+                    removed_count++;
+                }
+            }
+            cell->n_particles -= removed_count;  // Update count after removals
         }
     }
 
-    // Remove particles that collided
-    long new_n = 0;
-    for (long long i = 0; i < *n_part; i++) {
-        if (!to_remove[i]) {
-            particles[new_n] = particles[i];
-            new_n++;
-        }
-    }
-    *n_part = new_n;
     free(to_remove);
-    
     free(collision_group);  // Clean up memory
     return collisions;
 }
-
 
 void print_particles_and_cells(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside]) {
     // Print particles
@@ -373,11 +367,11 @@ int main(int argc, char **argv)
     cell_t grid[ncside][ncside];
 
     exec_time = -omp_get_wtime();
-    
-    calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
 
+    
     #pragma omp parallel
     {
+        calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
     
@@ -385,16 +379,10 @@ int main(int argc, char **argv)
             //print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
-            
-
-            # pragma omp critical
-            {
-                total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
-            }
-            # pragma omp barrier
+            #pragma omp atomic
+            total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
     }
-
 
 
     printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
@@ -405,6 +393,7 @@ int main(int argc, char **argv)
             free(grid[i][j].particles);
         }
     }
+
     
     exec_time += omp_get_wtime();
     fprintf(stderr, "%.1fs\n", exec_time);
