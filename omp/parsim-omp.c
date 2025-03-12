@@ -240,26 +240,8 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
 }
 
 
-void remove_particle(particle_t *particles, long long *n_part, 
-    long index_to_remove) {
-
-    if (index_to_remove < 0 || index_to_remove >= *n_part) {
-        printf("Invalid index for removal %lld\n", index_to_remove);
-        return;
-    }
-
-    // Swap with last particle in the array (if not last already)
-    if (index_to_remove != *n_part - 1) {
-        particles[index_to_remove] = particles[*n_part - 1];
-    }
-
-    // Reduce the total particle count
-    #pragma omp atomic
-    (*n_part)--;
-}
-
 void disable_particle(particle_t *particles, long long *n_part, 
-    long index_to_remove) {
+    long long index_to_remove) {
 
     if (index_to_remove < 0 || index_to_remove >= *n_part) {
         printf("Invalid index for removal %lld\n", index_to_remove);
@@ -270,13 +252,10 @@ void disable_particle(particle_t *particles, long long *n_part,
 
 }
 
+
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
-    long long *collision_group = (long long *)malloc(*n_part * sizeof(long long));  // Track collision groups
     int *to_remove = (int*) calloc(*n_part, sizeof(int));
-
-    for (long long i = 0; i < *n_part; i++) 
-        collision_group[i] = -1;  // Initialize all as ungrouped
 
     #pragma omp for 
     for (long i = 0; i < ncside; i++) {
@@ -300,30 +279,15 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                         long long id1 = (long long)(particle1 - particles);
                         long long id2 = (long long)(particle2 - particles);
                         //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
-                        if (collision_group[id1] == -1 && collision_group[id2] == -1) {
-                            collision_group[id1] = collision_group[id2] = collisions;
+                        if (to_remove[id1] == 0 && to_remove[id2] == 0) {
                             #pragma omp atomic
-                            collisions++;  
-                        } 
-                        else if (collision_group[id1] == -1) {
-                            collision_group[id1] = collision_group[id2];
-                        } 
-                        else if (collision_group[id2] == -1) {
-                            collision_group[id2] = collision_group[id1];
-                        } 
-                        else if (collision_group[id1] != collision_group[id2]) {
-                            long old_group = collision_group[id2];
-                            for (long long k = 0; k < *n_part; k++) {
-                                if (collision_group[k] == old_group) {
-                                    collision_group[k] = collision_group[id1];
-                                }
-                            }
+                            collisions++;
                         }
+                        
+                        to_remove[id1] = to_remove[id2] = 1;
 
                         disable_particle(particles, n_part, id1);
                         disable_particle(particles, n_part, id2);
-                        
-
                     }
                 }
             }
@@ -331,7 +295,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
         }
     }
 
-    free(collision_group);  // Clean up memory
+    free(to_remove);  // Clean up memory
     return collisions;
 }
 
@@ -389,8 +353,9 @@ int main(int argc, char **argv)
     {
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
+            //#pragma omp single
             //printf("t=%ld\n", i);
-            // Calculate the center of mass of each cell
+
             //print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
