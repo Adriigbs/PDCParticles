@@ -38,7 +38,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 
 
 void reset_grid(long ncside, cell_t grid[][ncside]) {
-    #pragma omp for
+    #pragma omp for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             grid[i][j].m = 0.0;
@@ -54,7 +54,7 @@ void reset_grid(long ncside, cell_t grid[][ncside]) {
 
 void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
 
-    #pragma omp for
+    #pragma omp for 
     for (long long i = 0; i < n_part; i++) {
 
         // Skip disabled particles
@@ -81,7 +81,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 
     reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
-    #pragma omp for
+    #pragma omp for 
     for(long long i = 0; i < n_part; i++) {
 
         // Skip disabled particles
@@ -106,7 +106,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
         
     }
 
-    #pragma omp for
+    #pragma omp for collapse(2) schedule(dynamic)
     // Divide by the number of particles in the cell to get the center of mass
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
@@ -133,7 +133,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 void update_particles(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
 
     // Iterate over every cell
-    #pragma omp for collapse(2) //vai juntar os dois for e dividir por celula 
+    #pragma omp for collapse(2) schedule(dynamic) //vai juntar os dois for e dividir por celula 
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
             
@@ -207,7 +207,7 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
     }
 
     // Update position and speed of particles
-    #pragma omp for collapse(2)
+    #pragma omp for collapse(2) schedule(dynamic)
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
 
@@ -257,7 +257,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
     long collisions = 0;
     int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
-    #pragma omp for 
+    #pragma omp for collapse(2) schedule(dynamic) 
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
@@ -368,6 +368,7 @@ int main(int argc, char **argv)
     printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
     free(particles);
+    #pragma omp parallel for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             free(grid[i][j].particles);
