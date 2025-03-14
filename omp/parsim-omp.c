@@ -38,6 +38,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 
 
 void reset_grid(long ncside, cell_t grid[][ncside]) {
+    #pragma omp for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             grid[i][j].m = 0.0;
@@ -53,6 +54,7 @@ void reset_grid(long ncside, cell_t grid[][ncside]) {
 
 void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
 
+    #pragma omp for 
     for (long long i = 0; i < n_part; i++) {
 
         // Skip disabled particles
@@ -64,6 +66,7 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
         if (x >= ncside) x = ncside - 1;
         if (y >= ncside) y = ncside - 1;
 
+        #pragma omp critical
         {
             grid[y][x].particles[grid[y][x].index] = &particles[i];
             grid[y][x].index++;
@@ -78,6 +81,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 
     reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
+    #pragma omp for 
     for(long long i = 0; i < n_part; i++) {
 
         // Skip disabled particles
@@ -91,14 +95,18 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
         if (y >= ncside) y = ncside - 1;
 
         // Sum the mass and position of the particle to the cell
-
+        #pragma omp atomic
         grid[y][x].m += particles[i].m;
+        #pragma omp atomic
         grid[y][x].x += particles[i].x * particles[i].m;
+        #pragma omp atomic
         grid[y][x].y += particles[i].y * particles[i].m;
+        #pragma omp atomic
         grid[y][x].n_particles++;
         
     }
 
+    #pragma omp for collapse(2) schedule(dynamic)
     // Divide by the number of particles in the cell to get the center of mass
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
@@ -109,8 +117,11 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
                 grid[i][j].y = 0;
             } else {
                 grid[i][j].index = 0;
+                #pragma omp atomic
                 grid[i][j].x /= grid[i][j].m;
+                #pragma omp atomic
                 grid[i][j].y /= grid[i][j].m;
+                #pragma omp critical
                 grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
             }
         }
@@ -122,6 +133,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
 void update_particles(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
 
     // Iterate over every cell
+    #pragma omp for collapse(2) schedule(dynamic) //vai juntar os dois for e dividir por celula 
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
             
@@ -195,6 +207,7 @@ void update_particles(particle_t *particles, long long n_part, long ncside, cell
     }
 
     // Update position and speed of particles
+    #pragma omp for collapse(2) schedule(dynamic)
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
 
@@ -244,6 +257,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
     long collisions = 0;
     int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
+    #pragma omp for collapse(2) schedule(dynamic) 
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
@@ -266,6 +280,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                         long long id2 = (long long)(particle2 - particles);
                         //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         if (to_remove[id1] == 0 && to_remove[id2] == 0) {
+                            #pragma omp atomic
                             collisions++;
                         }
                         
@@ -334,14 +349,17 @@ int main(int argc, char **argv)
     exec_time = -omp_get_wtime();
 
     
+    #pragma omp parallel
     {
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
+            //#pragma omp single
             //printf("t=%ld\n", i);
 
             //print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+            #pragma omp atomic
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
     }
@@ -350,6 +368,7 @@ int main(int argc, char **argv)
     printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
     free(particles);
+    #pragma omp parallel for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             free(grid[i][j].particles);
