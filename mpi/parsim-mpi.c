@@ -16,6 +16,12 @@
 #define POSITION(x_i, v_i, a, t) ((x_i) + (v_i) * (t) + 0.5 * (a) * (t) * (t))
 
 
+// Macros for cell indexing
+#define BLOCK_LOW(id, p, n) ((id < n % p) ? id * (n / p + 1) : id * (n / p) + n % p)
+#define BLOCK_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
+#define BLOCK_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
+
+
 typedef struct {
     double x, y;
     double m;
@@ -349,6 +355,10 @@ int main(int argc, char **argv)
 
     MPI_Barrier (MPI_COMM_WORLD);
     secs = - MPI_Wtime();
+
+
+
+
 
     {
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
