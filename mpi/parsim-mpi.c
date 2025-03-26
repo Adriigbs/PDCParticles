@@ -3,6 +3,7 @@
 #include <omp.h>
 #include <string.h>
 #include <math.h>
+#include <mpi.h>
 #include "init_particles.h"
 
 
@@ -13,6 +14,12 @@
 #define GRAV_FORCE(m1, m2, d) ((G * (m1) * (m2)) / ((d) * (d)))
 #define SPEED(v_i, a, t) ((v_i) + (a) * (t))
 #define POSITION(x_i, v_i, a, t) ((x_i) + (v_i) * (t) + 0.5 * (a) * (t) * (t))
+
+
+// Macros for cell indexing
+#define BLOCK_LOW(id, p, n) ((id < n % p) ? id * (n / p + 1) : id * (n / p) + n % p)
+#define BLOCK_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
+#define BLOCK_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
 
 
 typedef struct {
@@ -38,7 +45,6 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 
 
 void reset_grid(long ncside, cell_t grid[][ncside]) {
-    #pragma omp for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             grid[i][j].m = 0.0;
@@ -54,7 +60,6 @@ void reset_grid(long ncside, cell_t grid[][ncside]) {
 
 void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
 
-    #pragma omp for 
     for (long long i = 0; i < n_part; i++) {
 
         // Skip disabled particles
@@ -66,8 +71,7 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
         if (x >= ncside) x = ncside - 1;
         if (y >= ncside) y = ncside - 1;
 
-        // TODO: maybe usar um lock por cell?
-        #pragma omp critical
+        // maybe usar um lock por cell?
         {
             grid[y][x].particles[grid[y][x].index] = &particles[i];
             grid[y][x].index++;
@@ -77,12 +81,134 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
 
 }
 
+
+// Calculates center of mass, allocates grid particles and reallocates main particle array
+long long divide_by_processes(particle_t *particles, long long n_part, long ncside,
+                              cell_t grid[][ncside], double cell_side, int id, int p) {
+    
+    long long new_n_part = 0;
+    reset_grid(ncside, grid);
+    
+    for (long long i = 0; i < n_part; i++) {
+
+        // Skip disabled particles
+        if (particles[i].m == 0) continue;
+
+        long x = particles[i].x / cell_side;
+        long y = particles[i].y / cell_side;
+
+        if (x >= ncside) x = ncside - 1;
+        if (y >= ncside) y = ncside - 1;
+
+        // If process is responsible for this grid's row
+        if (y % p == id) {
+            grid[y][x].m += particles[i].m;
+            grid[y][x].x += particles[i].x * particles[i].m;
+            grid[y][x].y += particles[i].y * particles[i].m;
+            grid[y][x].n_particles++;
+        }
+    }
+
+    // Compute center of mass for each cell in the rows handled by this process
+    for (long i = id; i < ncside; i += p) {
+        for (long j = 0; j < ncside; j++) {
+
+            if (grid[i][j].n_particles == 0) {
+                grid[i][j].m = 0;
+                grid[i][j].x = 0;
+                grid[i][j].y = 0;
+            } else {
+                grid[i][j].index = 0;
+                grid[i][j].x /= grid[i][j].m;
+                grid[i][j].y /= grid[i][j].m;
+                grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
+            }
+        }
+    }
+
+    // Buffers for sending and receiving row data
+    double *current_row_data = (double*) malloc(ncside * 3 * sizeof(double));
+    double *recv_up = (double*) malloc(ncside * 3 * sizeof(double));
+    double *recv_down = (double*) malloc(ncside * 3 * sizeof(double));
+
+    for (long i = id; i < ncside; i += p) {
+        for (long j = 0; j < ncside; j++) {
+            current_row_data[j * 3 + 0] = grid[id][j].m;
+            current_row_data[j * 3 + 1] = grid[id][j].x;
+            current_row_data[j * 3 + 2] = grid[id][j].y;
+        }
+
+        int above = (i - 1 + ncside) % ncside;
+        int below = (i + 1 + ncside) % ncside;
+
+        int rank_above = above % p;
+        int rank_below = below % p;
+
+        MPI_Status status;
+        // if they don't belong to the same process, sendrecv
+        if (rank_above != id) {
+            MPI_Sendrecv(current_row_data, ncside * 3, MPI_DOUBLE, rank_above, 0,
+                recv_down, ncside * 3, MPI_DOUBLE, rank_below, 0,
+                MPI_COMM_WORLD, &status);
+        }
+        if (rank_below != id) {
+            MPI_Sendrecv(current_row_data, ncside * 3, MPI_DOUBLE, rank_below, 0,
+                recv_up, ncside * 3, MPI_DOUBLE, rank_above, 0,
+                MPI_COMM_WORLD, &status);
+        }
+    }
+
+    // Update grid with received data
+    for (long j = 0; j < ncside; j++) {
+        if (id > 0) {  // If there's a process above, update its row
+            grid[id - 1][j].m = recv_up[j * 3 + 0];
+            grid[id - 1][j].x = recv_up[j * 3 + 1];
+            grid[id - 1][j].y = recv_up[j * 3 + 2];
+        }
+        if (id < p - 1) {  // If there's a process below, update its row
+            grid[id + 1][j].m = recv_down[j * 3 + 0];
+            grid[id + 1][j].x = recv_down[j * 3 + 1];
+            grid[id + 1][j].y = recv_down[j * 3 + 2];
+        }
+    }
+
+    // Free allocated memory
+    free(current_row_data);
+    free(recv_up);
+    free(recv_down);
+
+
+    // Constructs particles array for each cell that belongs to this process
+    for (long long i = 0; i < n_part; i++) {
+
+        // Skip disabled particles
+        if (particles[i].m == 0) continue;
+
+        long x = particles[i].x / cell_side;
+        long y = particles[i].y / cell_side;
+
+        if (x >= ncside) x = ncside - 1;
+        if (y >= ncside) y = ncside - 1;
+
+        // If process is responsible for this grid's row
+        if (y % p == id) {
+            particles[new_n_part++] = particles[i];
+
+            grid[y][x].particles[grid[y][x].index] = &particles[new_n_part - 1];
+            grid[y][x].index++;
+        }
+    }
+
+    // reallocates the necessary memory for the particles array
+    particles = (particle_t*) realloc(particles, new_n_part * sizeof(particle_t));
+    return new_n_part; 
+}
+
 // Calculate the center of mass of each cell
 void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, long seed) {
 
     reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
-    #pragma omp for 
     for(long long i = 0; i < n_part; i++) {
 
         // Skip disabled particles
@@ -96,18 +222,14 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
         if (y >= ncside) y = ncside - 1;
 
         // Sum the mass and position of the particle to the cell
-        #pragma omp atomic
+
         grid[y][x].m += particles[i].m;
-        #pragma omp atomic
         grid[y][x].x += particles[i].x * particles[i].m;
-        #pragma omp atomic
         grid[y][x].y += particles[i].y * particles[i].m;
-        #pragma omp atomic
         grid[y][x].n_particles++;
         
     }
 
-    #pragma omp for collapse(2) schedule(dynamic)
     // Divide by the number of particles in the cell to get the center of mass
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
@@ -118,12 +240,8 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
                 grid[i][j].y = 0;
             } else {
                 grid[i][j].index = 0;
-                #pragma omp atomic
                 grid[i][j].x /= grid[i][j].m;
-                #pragma omp atomic
                 grid[i][j].y /= grid[i][j].m;
-                #pragma omp critical
-                // TODO: estamos com segfault, prof suspeita que pode ser por causa disso
                 grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
             }
         }
@@ -132,12 +250,12 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
     split_particles_by_cell(particles, n_part, ncside, grid, cell_side);
 }
 
-void update_particles(long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
+void update_particles(particle_t *particles, long long n_part, long ncside,
+                      cell_t grid[][ncside], double cell_side, double side, int id, int p) {
 
-    // Iterate over every cell
-    #pragma omp for collapse(2) schedule(dynamic) //vai juntar os dois for e dividir por celula 
+    // Iterate over every cell belonging to this process
     for (long x = 0; x < ncside; x++) {
-        for (long y = 0; y < ncside; y++) {
+        for (long y = id; y < ncside; y += p) {
             
             cell_t *cell = &grid[y][x];
             particle_t **particles = cell->particles;
@@ -209,9 +327,8 @@ void update_particles(long long n_part, long ncside, cell_t grid[][ncside], doub
     }
 
     // Update position and speed of particles
-    #pragma omp for collapse(2) schedule(dynamic)
     for (long x = 0; x < ncside; x++) {
-        for (long y = 0; y < ncside; y++) {
+        for (long y = id; y < ncside; y += p) {
 
             cell_t *cell = &grid[y][x];
             particle_t **particles = cell->particles;
@@ -235,6 +352,8 @@ void update_particles(long long n_part, long ncside, cell_t grid[][ncside], doub
                 // Wrap-around
                 particles[i]->x = fmod(particles[i]->x + side, side);
                 particles[i]->y = fmod(particles[i]->y + side, side);
+
+                // TODO: if new position is in different row, send it (and receive)
             }  
         }
     }
@@ -259,7 +378,6 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
     long collisions = 0;
     int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
-    #pragma omp for collapse(2) schedule(dynamic) 
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
@@ -282,7 +400,6 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                         long long id2 = (long long)(particle2 - particles);
                         //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         if (to_remove[id1] == 0 && to_remove[id2] == 0) {
-                            #pragma omp atomic
                             collisions++;
                         }
                         
@@ -328,13 +445,21 @@ int main(int argc, char **argv)
     double side;
     long ncside;
     long long n_part;
+    long long local_n_part;
     long time_steps;
     
     double cell_side;
 
+    MPI_Status status;
+    int id, p;
+
     // Parse arguments from command line
     parse_args(argc, argv, &seed, &side, &ncside, &n_part, &time_steps);
 
+    MPI_Init (&argc, &argv);
+
+    MPI_Comm_rank (MPI_COMM_WORLD, &id);
+    MPI_Comm_size (MPI_COMM_WORLD, &p);
     
     // Calculate the side size of each cell
     cell_side = (double) side / ncside;
@@ -348,27 +473,27 @@ int main(int argc, char **argv)
 
     exec_time = -omp_get_wtime();
 
-    
-    #pragma omp parallel
     {
-        calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+        n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
+            
+        //calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
-            //#pragma omp single
             //printf("t=%ld\n", i);
 
             //print_particles_and_cells(particles, n_part, ncside, grid);
-            update_particles(n_part, ncside, grid, cell_side, side);
-            calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
-            #pragma omp atomic
+            // TODO: update_particles MPI not implemented
+            update_particles(particles, n_part, ncside, grid, cell_side, side, id, p);
+            n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
+            //printf("%.3lf %.3lf %lld %lld\n", particles[0].x, particles[0].y, particles[0].id, n_part);
+            // TODO: detect_collisions MPI not implemented
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
     }
 
-
-    printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
+    // TODO: this won't work if particle 0 moves rows and stops being at index 0
+    if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
     free(particles);
-    #pragma omp parallel for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             free(grid[i][j].particles);
@@ -377,8 +502,10 @@ int main(int argc, char **argv)
 
     
     exec_time += omp_get_wtime();
-    fprintf(stderr, "%.1fs\n", exec_time);
+    if (!id) fprintf(stderr, "%.1fs\n", exec_time);
 
+    MPI_Barrier (MPI_COMM_WORLD);
+    MPI_Finalize();
    
     return 0;
 }
