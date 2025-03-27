@@ -4,6 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include <mpi.h>
+#include "cell.h"
 #include "init_particles.h"
 
 
@@ -17,9 +18,9 @@
 
 
 // Macros for cell indexing
-#define BLOCK_LOW(id, p, n) ((id < n % p) ? id * (n / p + 1) : id * (n / p) + n % p)
-#define BLOCK_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
-#define BLOCK_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
+#define ROW_LOW(id, p, n) ((id < n % p) ? id * (n / p + 1) : id * (n / p) + n % p)
+#define ROW_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
+#define ROW_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
 
 
 typedef struct {
@@ -459,17 +460,22 @@ int main(int argc, char **argv)
     // Calculate the side size of each cell
     cell_side = (double) side / ncside;
 
-    // Allocate memory for particles 
-    // Initialize particles
-    particle_t *particles = (particle_t*) malloc(n_part * sizeof(particle_t));
-    init_particles(seed, side, ncside, n_part, particles);
+    int process_assigned_rows = ROW_SIZE(id, p, ncside);
 
-    cell_t grid[ncside][ncside];
+    cell_t **grid = (cell_t**) malloc(process_assigned_rows * sizeof(cell_t*));
+    for (long i = 0; i < process_assigned_rows; i++) {
+        grid[i] = (cell_t*) malloc(ncside * sizeof(cell_t));
+    }
+
+    // not sure if necessary, probably yes
+    init_grid(ncside, grid, n_part, process_assigned_rows);
 
     exec_time = -omp_get_wtime();
 
     {
-        n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
+        //n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
+
+        init_process_particles(seed, side, ncside, n_part, grid, id, p);
             
         //calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
@@ -477,11 +483,11 @@ int main(int argc, char **argv)
 
             //print_particles_and_cells(particles, n_part, ncside, grid);
             // TODO: update_particles MPI not implemented
-            update_particles(particles, n_part, ncside, grid, cell_side, side, id, p);
-            n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
+            //update_particles(particles, n_part, ncside, grid, cell_side, side, id, p);
+            //n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
             //printf("%.3lf %.3lf %lld %lld\n", particles[0].x, particles[0].y, particles[0].id, n_part);
             // TODO: detect_collisions MPI not implemented
-            total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+            //total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
     }
 

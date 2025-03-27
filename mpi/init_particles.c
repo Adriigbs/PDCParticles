@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "init_particles.h"
+#include "cell.h"
 #define G 6.67408e-11
 #define EPSILON2 (0.005*0.005)
 #define DELTAT 0.1
@@ -55,6 +56,52 @@ void init_particles(long seed, double side, long ncside, long long n_part, parti
 
         par[i].m = rnd01() * 0.01 * (ncside * ncside) / n_part / G * EPSILON2;
     }
+}
+
+void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int process_id, int num_processes) {
+    double (*rnd01)() = rnd_uniform01;
+    long long i;
+
+    double cell_side = (double) side / ncside;
+
+    if(seed < 0) {
+        rnd01 = rnd_normal01;
+        seed = -seed;
+    }
+    
+    init_r4uni(seed);
+
+    // calculate process assigned lines
+    
+    for(i = 0; i < n_part; i++) {
+
+        double x = rnd01() * side;
+        double y = rnd01() * side;
+
+        int row = y / cell_side;
+        int col = x / cell_side;
+
+        if (col >= ncside) col = ncside - 1;
+        if (row >= ncside) row = ncside - 1;
+
+        if (row >= ROW_LOW(process_id, num_processes, ncside) && row <= ROW_HIGH(process_id, num_processes, ncside)) {
+
+            particle_t particle;
+
+            particle.id = i;
+            particle.x = x;
+            particle.y = y;
+            particle.vx = (rnd01() - 0.5) * side / ncside / 5.0;
+            particle.vy = (rnd01() - 0.5) * side / ncside / 5.0;
+            particle.m = rnd01() * 0.01 * (ncside * ncside) / n_part / G * EPSILON2;
+
+
+            add_particle_to_cell(&grid[row][col], particle);
+
+        }
+    }
+
+
 }
 
 
