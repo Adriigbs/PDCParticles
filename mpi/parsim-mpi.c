@@ -133,9 +133,9 @@ long long divide_by_processes(particle_t *particles, long long n_part, long ncsi
 
     for (long i = id; i < ncside; i += p) {
         for (long j = 0; j < ncside; j++) {
-            current_row_data[j * 3 + 0] = grid[id][j].m;
-            current_row_data[j * 3 + 1] = grid[id][j].x;
-            current_row_data[j * 3 + 2] = grid[id][j].y;
+            current_row_data[j * 3 + 0] = grid[i][j].m;
+            current_row_data[j * 3 + 1] = grid[i][j].x;
+            current_row_data[j * 3 + 2] = grid[i][j].y;
         }
 
         int above = (i - 1 + ncside) % ncside;
@@ -148,27 +148,23 @@ long long divide_by_processes(particle_t *particles, long long n_part, long ncsi
         // if they don't belong to the same process, sendrecv
         if (rank_above != id) {
             MPI_Sendrecv(current_row_data, ncside * 3, MPI_DOUBLE, rank_above, 0,
-                recv_down, ncside * 3, MPI_DOUBLE, rank_below, 0,
-                MPI_COMM_WORLD, &status);
+                        recv_down, ncside * 3, MPI_DOUBLE, rank_below, 0,
+                        MPI_COMM_WORLD, &status);
         }
         if (rank_below != id) {
             MPI_Sendrecv(current_row_data, ncside * 3, MPI_DOUBLE, rank_below, 0,
-                recv_up, ncside * 3, MPI_DOUBLE, rank_above, 0,
-                MPI_COMM_WORLD, &status);
+                        recv_up, ncside * 3, MPI_DOUBLE, rank_above, 0,
+                        MPI_COMM_WORLD, &status);
         }
-    }
+        
+        for (long j = 0; j < ncside; j++) {
+            grid[above][j].m = recv_up[j * 3 + 0];
+            grid[above][j].x = recv_up[j * 3 + 1];
+            grid[above][j].y = recv_up[j * 3 + 2];
 
-    // Update grid with received data
-    for (long j = 0; j < ncside; j++) {
-        if (id > 0) {  // If there's a process above, update its row
-            grid[id - 1][j].m = recv_up[j * 3 + 0];
-            grid[id - 1][j].x = recv_up[j * 3 + 1];
-            grid[id - 1][j].y = recv_up[j * 3 + 2];
-        }
-        if (id < p - 1) {  // If there's a process below, update its row
-            grid[id + 1][j].m = recv_down[j * 3 + 0];
-            grid[id + 1][j].x = recv_down[j * 3 + 1];
-            grid[id + 1][j].y = recv_down[j * 3 + 2];
+            grid[below][j].m = recv_down[j * 3 + 0];
+            grid[below][j].x = recv_down[j * 3 + 1];
+            grid[below][j].y = recv_down[j * 3 + 2];
         }
     }
 
@@ -176,7 +172,6 @@ long long divide_by_processes(particle_t *particles, long long n_part, long ncsi
     free(current_row_data);
     free(recv_up);
     free(recv_down);
-
 
     // Constructs particles array for each cell that belongs to this process
     for (long long i = 0; i < n_part; i++) {
