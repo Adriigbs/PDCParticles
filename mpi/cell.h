@@ -8,7 +8,7 @@
 #define ROW_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
 #define ROW_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
 
-typedef struct {
+typedef struct cell_t {
     double x, y;
     double m;
     long long n_particles;
@@ -18,7 +18,7 @@ typedef struct {
 
 void add_particle_to_cell(cell_t *cell, particle_t particle);
 
-void remove_particle_from_cell(cell_t *cell, long index);
+void remove_particle_from_cell(cell_t *cell, long long index);
 
 
 #endif

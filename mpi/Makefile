@@ -6,8 +6,8 @@ CFLAGS = -O2 -fopenmp -g
 TARGET = parsim
 
 # Source and header files
-SRCS = parsim-mpi.c init_particles.c
-HEADERS = init_particles.h
+SRCS = parsim-mpi.c init_particles.c cell.c
+HEADERS = init_particles.h cell.h
 OBJS = $(SRCS:.c=.o)
 
 # Default rule: Build the program

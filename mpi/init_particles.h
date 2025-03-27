@@ -1,6 +1,8 @@
 #ifndef INIT_PARTICLES_H
 #define INIT_PARTICLES_H
 
+typedef struct cell_t cell_t;
+
 typedef struct {
     long long id;
     double x, y;
@@ -12,6 +14,6 @@ typedef struct {
 // Function prototype
 void init_particles(long seed, double side, long ncside, long long n_part, particle_t *par);
 
-void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int process_id, int num_processes)
+void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int process_id, int num_processes);
 
 #endif // INIT_PARTICLES_H

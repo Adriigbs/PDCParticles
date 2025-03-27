@@ -4,8 +4,8 @@
 #include <string.h>
 #include <math.h>
 #include <mpi.h>
-#include "cell.h"
 #include "init_particles.h"
+#include "cell.h"
 
 
 #define G 6.67408e-11  
@@ -21,15 +21,6 @@
 #define ROW_LOW(id, p, n) ((id < n % p) ? id * (n / p + 1) : id * (n / p) + n % p)
 #define ROW_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
 #define ROW_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
-
-
-typedef struct {
-    double x, y;
-    double m;
-    long long n_particles;
-    long long index;
-    particle_t **particles;
-} cell_t;
 
 
 void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, long long *n_part, long *n_steps) {
@@ -74,7 +65,7 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
 
         // maybe usar um lock por cell?
         {
-            grid[y][x].particles[grid[y][x].index] = &particles[i];
+            grid[y][x].particles[grid[y][x].index] = particles[i];
             grid[y][x].index++;
         }
         
@@ -82,7 +73,7 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
 
 }
 
-
+/*
 // Calculates center of mass, allocates grid particles and reallocates main particle array
 long long divide_by_processes(particle_t *particles, long long n_part, long ncside,
                               cell_t grid[][ncside], double cell_side, int id, int p) {
@@ -430,7 +421,7 @@ void print_particles_and_cells(particle_t *particles, long long n_part, long ncs
             cell_index++;
         }
     }
-}
+}*/
 
 
 int main(int argc, char **argv)
@@ -461,6 +452,7 @@ int main(int argc, char **argv)
     cell_side = (double) side / ncside;
 
     int process_assigned_rows = ROW_SIZE(id, p, ncside);
+    //printf("process %d gets rows %ld to %ld\n", id, ROW_LOW(id,p,ncside), ROW_HIGH(id,p,ncside));
 
     cell_t **grid = (cell_t**) malloc(process_assigned_rows * sizeof(cell_t*));
     for (long i = 0; i < process_assigned_rows; i++) {
@@ -468,14 +460,14 @@ int main(int argc, char **argv)
     }
 
     // not sure if necessary, probably yes
-    init_grid(ncside, grid, n_part, process_assigned_rows);
+    init_grid(ncside, grid, n_part / (ncside * ncside), process_assigned_rows);
 
     exec_time = -omp_get_wtime();
 
     {
         //n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
 
-        init_process_particles(seed, side, ncside, n_part, grid, id, p);
+        init_process_particles(seed, side, ncside, n_part / (ncside * ncside), grid, id, p);
             
         //calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
@@ -492,19 +484,20 @@ int main(int argc, char **argv)
     }
 
     // TODO: this won't work if particle 0 moves rows and stops being at index 0
-    if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
+    //if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
-    free(particles);
-    for (long i = 0; i < ncside; i++) {
+    //free(particles);
+    for (long i = 0; i < process_assigned_rows; i++) {
         for (long j = 0; j < ncside; j++) {
             free(grid[i][j].particles);
         }
+        free(grid[i]);
     }
 
     
     exec_time += omp_get_wtime();
     if (!id) fprintf(stderr, "%.1fs\n", exec_time);
-
+    
     MPI_Barrier (MPI_COMM_WORLD);
     MPI_Finalize();
    

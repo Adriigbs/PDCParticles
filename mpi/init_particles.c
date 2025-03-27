@@ -84,7 +84,7 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
         if (col >= ncside) col = ncside - 1;
         if (row >= ncside) row = ncside - 1;
 
-        if (row >= ROW_LOW(process_id, num_processes, ncside) && row <= ROW_HIGH(process_id, num_processes, ncside)) {
+        if (row >= ROW_LOW(process_id, num_processes, ncside) && row < ROW_HIGH(process_id, num_processes, ncside)) {
 
             particle_t particle;
 
@@ -95,6 +95,7 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
             particle.vy = (rnd01() - 0.5) * side / ncside / 5.0;
             particle.m = rnd01() * 0.01 * (ncside * ncside) / n_part / G * EPSILON2;
 
+            row -= ROW_LOW(process_id,num_processes,ncside); // get local index
 
             add_particle_to_cell(&grid[row][col], particle);
 

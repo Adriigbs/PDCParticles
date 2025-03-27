@@ -18,7 +18,6 @@ void init_grid(long ncside, cell_t **grid, long initial_size, int rows) {
             grid[i][j].n_particles = initial_size;
             grid[i][j].index = 0;
             grid[i][j].particles = (particle_t*) malloc(initial_size * sizeof(particle_t));
-        
         }
     }
 }
@@ -33,7 +32,7 @@ void add_particle_to_cell(cell_t *cell, particle_t particle) {
     cell->index++;
 }
 
-void remove_particle_from_cell(cell_t *cell, long index) {
+void remove_particle_from_cell(cell_t *cell, long long index) {
 
     cell->particles[index] = cell->particles[cell->index - 1];
     cell->index--;
