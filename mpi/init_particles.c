@@ -58,7 +58,7 @@ void init_particles(long seed, double side, long ncside, long long n_part, parti
     }
 }
 
-void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int process_id, int num_processes) {
+void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int id, int p) {
     double (*rnd01)() = rnd_uniform01;
     long long i;
 
@@ -84,31 +84,31 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
         if (col >= ncside) col = ncside - 1;
         if (row >= ncside) row = ncside - 1;
 
-        if (row >= ROW_LOW(process_id, num_processes, ncside) && row < ROW_HIGH(process_id, num_processes, ncside)) {
+        particle_t particle;
 
-            particle_t particle;
+        particle.id = i;
+        particle.x = x;
+        particle.y = y;
+        particle.vx = (rnd01() - 0.5) * side / ncside / 5.0;
+        particle.vy = (rnd01() - 0.5) * side / ncside / 5.0;
+        particle.m = rnd01() * 0.01 * (ncside * ncside) / n_part / G * EPSILON2;
 
-            particle.id = i;
-            particle.x = x;
-            particle.y = y;
-            particle.vx = (rnd01() - 0.5) * side / ncside / 5.0;
-            particle.vy = (rnd01() - 0.5) * side / ncside / 5.0;
-            particle.m = rnd01() * 0.01 * (ncside * ncside) / n_part / G * EPSILON2;
+        if (row >= ROW_LOW(id, p, ncside) && row < ROW_HIGH(id, p, ncside)) {
 
-            row -= ROW_LOW(process_id,num_processes,ncside); // get local index
+            row -= ROW_LOW(id, p, ncside); // get local index
 
             add_particle_to_cell(&grid[row][col], particle);
 
             grid[row][col].m += particle.m;
             grid[row][col].x += particle.x * particle.m;
             grid[row][col].y += particle.y * particle.m;
-
         }
     }
 
     // Divide by the number of particles in the cell to get the center of mass
-    for (int i = 0; i < ROW_SIZE(process_id, num_processes, ncside); i++) {
-        for (int j = 0; j < ncside; j++) {
+    long size = ROW_SIZE(id, p, ncside);
+    for (long i = 0; i < size; i++) {
+        for (long j = 0; j < ncside; j++) {
 
             if (grid[i][j].m > 0) {
                 grid[i][j].x /= grid[i][j].m;
@@ -116,8 +116,6 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
             }
         }
     }
-
-
 }
 
 

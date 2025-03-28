@@ -466,8 +466,8 @@ int main(int argc, char **argv)
 
     {
         init_process_particles(seed, side, ncside, n_part, grid, id, p);
-
             
+
         //calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
@@ -486,6 +486,9 @@ int main(int argc, char **argv)
     //if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
     for (long i = 0; i < process_assigned_rows; i++) {
+        for (long j = 0; j < ncside; j++) {
+            free(grid[i][j].particles);
+        }
         free(grid[i]);
     }
     free(grid);
