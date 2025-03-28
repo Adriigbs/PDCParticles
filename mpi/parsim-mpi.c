@@ -456,20 +456,23 @@ void print_particles_and_cells(particle_t *particles, long long n_part, long ncs
 }*/
 
 
-void calculate_center_of_mass(long long n_part, long ncside, cell_t **grid, double cell_side, int id, int p) {
+void calculate_center_of_mass(long ncside, cell_t **grid, int id, int p) {
 
     long size = ROW_SIZE(id, p, ncside);
 
     for (long i = 0; i < size; i++) {
         for (long j = 0; j < ncside; j++) {
-            grid[i][j].m = 0.0;
-            grid[i][j].x = 0.0;
-            grid[i][j].y = 0.0;
+            cell_t *cell = &grid[i][j];
+            particle_t *particles = cell->particles;
 
-            for (long idx = 0; idx < grid[i][j].index; idx++) {
-                grid[i][j].m += grid[i][j].particles[idx].m;
-                grid[i][j].x += grid[i][j].particles[idx].x * grid[i][j].particles[idx].m;
-                grid[i][j].y += grid[i][j].particles[idx].y * grid[i][j].particles[idx].m;
+            cell->m = 0.0;
+            cell->x = 0.0;
+            cell->y = 0.0;
+
+            for (long idx = 0; idx < cell->index; idx++) {
+                cell->m += particles[idx].m;
+                cell->x += particles[idx].x * particles[idx].m;
+                cell->y += particles[idx].y * particles[idx].m;
             }
         }
     }
@@ -486,24 +489,42 @@ void calculate_center_of_mass(long long n_part, long ncside, cell_t **grid, doub
 }
 
 
-void update_particles(particle_t *particles, long long n_part, long ncside,
+void update_particles(long long n_part, long ncside,
                 cell_t **grid, double cell_side, double side, int id, int p) {
 
-    MPI_Request request; // will not use i think
+    MPI_Request requests[4];  // 2 sends + 2 receives
+    int request_count = 0;
 
     int n_rows = ROW_SIZE(id, p, ncside);
 
     int above = (id - 1 + p) % p;
     int below = (id + 1) % p;
 
-    MPI_Isend(grid[0], ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &request);
-    MPI_Isend(grid[ROW_SIZE(id, p, ncside) - 1], ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &request);
+    double *send_above = (double*) malloc(ncside * 3 * sizeof(double));
+    double *send_below = (double*) malloc(ncside * 3 * sizeof(double));
+    double *recv_above = (double*) malloc(ncside * 3 * sizeof(double));
+    double *recv_below = (double*) malloc(ncside * 3 * sizeof(double));
 
+    for (long j = 0; j < ncside; j++) {
+        send_above[j * 3] = grid[0][j].m;
+        send_above[j * 3 + 1] = grid[0][j].x;
+        send_above[j * 3 + 2] = grid[0][j].y;
+        
+        send_below[j * 3] = grid[n_rows - 1][j].m;
+        send_below[j * 3 + 1] = grid[n_rows - 1][j].x;
+        send_below[j * 3 + 2] = grid[n_rows - 1][j].y;
+    }
 
-    for (long x = 0; x < n_rows; x++) {
-        for (long y = 0; y < ncside; y++) {
+    MPI_Irecv(recv_above, ncside * 3, MPI_DOUBLE, above, 0, MPI_COMM_WORLD, &requests[request_count++]);
+    MPI_Irecv(recv_below, ncside * 3, MPI_DOUBLE, below, 0, MPI_COMM_WORLD, &requests[request_count++]);
+
+    MPI_Isend(send_above, ncside * 3, MPI_DOUBLE, above, 0, MPI_COMM_WORLD, &requests[request_count++]);
+    MPI_Isend(send_below, ncside * 3, MPI_DOUBLE, below, 0, MPI_COMM_WORLD, &requests[request_count++]);
+
+    for (long y = 0; y < n_rows; y++) {
+        for (long x = 0; x < ncside; x++) {
             
-            cell_t *cell = &grid[x][y];
+            cell_t *cell = &grid[y][x];
             int cell_num_particles = cell->index;
             particle_t *particles = cell->particles;
 
@@ -527,19 +548,248 @@ void update_particles(particle_t *particles, long long n_part, long ncside,
 
                     force_x += GRAV_FORCE(pm, particles[j].m, distance) * (distance_x / distance);
                     force_y += GRAV_FORCE(pm, particles[j].m, distance) * (distance_y / distance);
-
                 }
 
+                // the same as serial
+                if (particles[i].id == 661) printf("force before: %.15lf\n", force_x);
 
-                // Receive neighboring cells here or finish the loop and only add neighboring cells after
-                // Don't know what is best
+                MPI_Waitall(request_count, requests, MPI_STATUSES_IGNORE);
+
+                // Add force from neighboring cells
+                for (long dx = -1; dx <= 1; dx++) {
+                    for (long dy = -1; dy <= 1; dy++) {
+
+                        if (dx == 0 && dy == 0) continue; // skip own cell
+
+                        long nx = (x + dx + ncside) % ncside; // Wrap around edges
+
+                        double distance_x = 0;
+                        double distance_y = 0;
+                        double neighbor_cell_m = 0;
+
+                        if (y + dy >= n_rows) {
+                            continue;
+                            neighbor_cell_m = recv_above[nx*3];
+                            distance_x = recv_above[nx*3+1] - px;
+                            distance_y = recv_above[nx*3+2] - py;
+                        } else if (y + dy < 0) {
+                            continue;
+                            neighbor_cell_m = recv_below[nx*3];
+                            distance_x = recv_below[nx*3+1] - px;
+                            distance_y = recv_below[nx*3+2] - py;
+                            neighbor_cell_m = 0;
+                        } else {
+                            long ny = (y + dy + ncside) % ncside;
+                            neighbor_cell_m = grid[ny][nx].m;
+                            distance_x = grid[ny][nx].x - px;
+                            distance_y = grid[ny][nx].y - py;
+                        }
+
+                        if (x + dx >= ncside) distance_x += side;
+                        if (x + dx < 0) distance_x -= side;
+                        if (y + dy >= ncside) distance_y += side;
+                        if (y + dy < 0) distance_y -= side;
+
+                        double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary;
+
+                        force_x += GRAV_FORCE(pm, neighbor_cell_m, distance) * (distance_x / distance);
+                        force_y += GRAV_FORCE(pm, neighbor_cell_m, distance) * (distance_y / distance);
+                    }
+                }
+                // different from serial
+                if (particles[i].id == 661) printf("force after: %.15lf\n", force_x);
+
+                particles[i].gravity_x = force_x;
+                particles[i].gravity_y = force_y;
             }
-            
         }
     }
-              
 
+    free(send_above);
+    free(send_below);
+    free(recv_above);
+    free(recv_below);
+
+    // Update position and speed of particles
+    for (long y = 0; y < n_rows; y++) {
+        for (long x = 0; x < ncside; x++) {
+
+            cell_t *cell = &grid[y][x];
+            particle_t *particles = cell->particles;
+
+            // Iterate over every particle from each cell
+            for (long long i = 0; i < cell->index; i++) {
+
+                if (particles[i].m == 0) continue;
+
+                double acceleration_x = particles[i].gravity_x / particles[i].m;
+                double acceleration_y = particles[i].gravity_y / particles[i].m;
+    
+                // Update position
+                particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
+                particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
+    
+                // Update speed
+                particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
+                particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
+    
+                // Wrap-around
+                particles[i].x = fmod(particles[i].x + side, side);
+                particles[i].y = fmod(particles[i].y + side, side);
+            }  
+        }
+    }
+
+    // TODO: send particles that moved to row belonging to different process to that process
 }
+
+
+/*
+---------------- VERSAO QUE USA MPI_cell_t ----------------
+
+void update_particles(long long n_part, long ncside,
+                cell_t **grid, double cell_side, double side, int id, int p) {
+
+    MPI_Request requests[4];  // 2 sends + 2 receives
+    int request_count = 0;
+
+    int n_rows = ROW_SIZE(id, p, ncside);
+
+    int above = (id - 1 + p) % p;
+    int below = (id + 1) % p;
+
+    cell_t *recv_above = (cell_t *)malloc(ncside * sizeof(cell_t));
+    cell_t *recv_below = (cell_t *)malloc(ncside * sizeof(cell_t));
+
+    MPI_Irecv(recv_above, ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &requests[request_count++]);
+    MPI_Irecv(recv_below, ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &requests[request_count++]);
+
+    MPI_Isend(grid[0], ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &requests[request_count++]);
+    MPI_Isend(grid[n_rows - 1], ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &requests[request_count++]);
+
+    MPI_Waitall(request_count, requests, MPI_STATUSES_IGNORE);
+
+    for (long y = 0; y < n_rows; y++) {
+        for (long x = 0; x < ncside; x++) {
+            if (grid[y][x].m <= 0) printf("WHAT "); // not printing anything
+        }
+    }
+
+    for (long x = 0; x < ncside; x++) {
+        if (recv_above[x].m <= 0) printf("WHATabove "); // printing many things
+    }
+
+    for (long y = 0; y < n_rows; y++) {
+        for (long x = 0; x < ncside; x++) {
+            
+            cell_t *cell = &grid[y][x];
+            int cell_num_particles = cell->index;
+            particle_t *particles = cell->particles;
+
+            for (long long i = 0; i < cell_num_particles; i++) {
+
+                double px = particles[i].x;
+                double py = particles[i].y;
+                double pm = particles[i].m;
+
+                double force_x = 0.0;
+                double force_y = 0.0;
+
+                // Add force from other particles in the same cell
+                for (long long j = 0; j < cell_num_particles; j++) {
+
+                    if (i == j) continue;
+
+                    double distance_x = particles[j].x - px;
+                    double distance_y = particles[j].y - py;
+                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
+
+                    force_x += GRAV_FORCE(pm, particles[j].m, distance) * (distance_x / distance);
+                    force_y += GRAV_FORCE(pm, particles[j].m, distance) * (distance_y / distance);
+                }
+
+                // Add force from neighboring cells
+                for (long dx = -1; dx <= 1; dx++) {
+                    for (long dy = -1; dy <= 1; dy++) {
+
+                        if (dx == 0 && dy == 0) continue; // skip own cell
+
+                        long nx = (x + dx + ncside) % ncside; // Wrap around edges
+
+                        cell_t *neighbor_cell;
+
+                        if (y + dy >= n_rows) {
+                            if (particles[i].id == 661) printf("adding from row below\n");
+                            neighbor_cell = &recv_below[nx];
+                        } else if (y + dy < 0) {
+                            if (particles[i].id == 661) printf("adding from row above\n");
+                            neighbor_cell = &recv_above[nx];
+                        } else {
+                            long ny = (y + dy + ncside) % ncside;
+                            neighbor_cell = &grid[ny][nx];
+                        }
+
+                        if (particles[i].id == 661)printf("neighbor_cell.x = %lf, neighbor_cell.y = %lf, neighbor_cell.m = %lf\n", neighbor_cell->x, neighbor_cell->y, neighbor_cell->m);
+
+                        // Compute force from center of mass of the cell
+                        double distance_x = neighbor_cell->x - px;
+                        double distance_y = neighbor_cell->y - py;
+
+                        if (x + dx >= ncside) distance_x += side;
+                        if (x + dx < 0) distance_x -= side;
+                        if (y + dy >= ncside) distance_y += side;
+                        if (y + dy < 0) distance_y -= side;
+
+                        double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary;
+
+                        force_x += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_x / distance);
+                        force_y += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_y / distance);
+                    }
+                }
+
+                particles[i].gravity_x = force_x;
+                particles[i].gravity_y = force_y;
+            }
+        }
+    }
+
+    free(recv_above);
+    free(recv_below);
+
+    // Update position and speed of particles
+    for (long y = 0; y < n_rows; y++) {
+        for (long x = 0; x < ncside; x++) {
+
+            cell_t *cell = &grid[y][x];
+            particle_t *particles = cell->particles;
+
+            // Iterate over every particle from each cell
+            for (long long i = 0; i < cell->index; i++) {
+
+                if (particles[i].m == 0) continue;
+
+                double acceleration_x = particles[i].gravity_x / particles[i].m;
+                double acceleration_y = particles[i].gravity_y / particles[i].m;
+    
+                // Update position
+                particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
+                particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
+    
+                // Update speed
+                particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
+                particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
+    
+                // Wrap-around
+                particles[i].x = fmod(particles[i].x + side, side);
+                particles[i].y = fmod(particles[i].y + side, side);
+            }  
+        }
+    }
+
+    // TODO: send particles that moved to row belonging to different process to that process
+}
+*/
+
 
 int main(int argc, char **argv)
 {
@@ -572,7 +822,6 @@ int main(int argc, char **argv)
     cell_side = (double) side / ncside;
 
     int process_assigned_rows = ROW_SIZE(id, p, ncside);
-    //printf("process %d gets rows %ld to %ld\n", id, ROW_LOW(id,p,ncside), ROW_HIGH(id,p,ncside));
 
     cell_t **grid = (cell_t**) malloc(process_assigned_rows * sizeof(cell_t*));
     for (long i = 0; i < process_assigned_rows; i++) {
@@ -587,14 +836,17 @@ int main(int argc, char **argv)
     {
         init_process_particles(seed, side, ncside, n_part, grid, id, p);
 
-        calculate_center_of_mass(n_part, ncside, grid, cell_side, id, p);
+        calculate_center_of_mass(ncside, grid, id, p);
             
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
 
-            //print_particles_and_cells(particles, n_part, ncside, grid);
             // TODO: update_particles MPI not implemented
-            //update_particles(particles, n_part, ncside, grid, cell_side, side, id, p);
+            update_particles(n_part, ncside, grid, cell_side, side, id, p);
+            if (!id) printf("%.15lf %.15lf %lld\n", grid[0][0].particles[0].x, grid[0][0].particles[0].y, grid[0][0].particles[0].id);
+            MPI_Barrier (MPI_COMM_WORLD);
+            MPI_Finalize();
+            exit(0);
             //calculate_center_of_mass
             // TODO: detect_collisions MPI not implemented
             //total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
@@ -603,6 +855,17 @@ int main(int argc, char **argv)
 
     // TODO: this won't work if particle 0 moves rows and stops being at index 0
     //if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
+
+    // this is very convoluted, there's definitely a better way
+    for (long i = 0; i < ROW_SIZE(id,p,ncside); i++) {
+        for (long j = 0; j < ncside; j++) {
+            for (long idx = 0; idx < grid[i][j].index; idx++) {
+                if (grid[i][j].particles[idx].id == 0) {
+                    printf("%.3lf %.3lf\n%ld\n", grid[i][j].particles[idx].x, grid[i][j].particles[idx].y, total_num_collisions);
+                }
+            }
+        }
+    }
 
     for (long i = 0; i < process_assigned_rows; i++) {
         for (long j = 0; j < ncside; j++) {
