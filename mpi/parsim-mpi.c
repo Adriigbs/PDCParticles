@@ -23,6 +23,38 @@
 #define ROW_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
 
 
+MPI_Datatype MPI_particle_t;
+MPI_Datatype MPI_cell_t;
+
+void create_mpi_cell() {
+
+    int block_lengths[3] = {1, 1, 1};
+    MPI_Aint displacements[3];
+    MPI_Datatype types[3] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
+
+    displacements[0] = offsetof(cell_t, x);
+    displacements[1] = offsetof(cell_t, y);
+    displacements[2] = offsetof(cell_t, m);
+
+    MPI_Type_create_struct(3, block_lengths, displacements, types, &MPI_cell_t);
+    MPI_Type_commit(&MPI_cell_t);
+}
+
+void create_mpi_particle() {
+    int block_lengths[5] = {1, 1, 1, 1, 1};
+    MPI_Aint displacements[5];
+    MPI_Datatype types[5] = {MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
+
+    displacements[0] = offsetof(particle_t, id);
+    displacements[1] = offsetof(particle_t, x);
+    displacements[2] = offsetof(particle_t, y);
+    displacements[3] = offsetof(particle_t, vx);
+    displacements[4] = offsetof(particle_t, vy);
+
+    MPI_Type_create_struct(5, block_lengths, displacements, types, &MPI_particle_t);
+    MPI_Type_commit(&MPI_particle_t);
+}
+
 void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, long long *n_part, long *n_steps) {
     if(argc != 6) {
         fprintf(stderr, "Usage: %s <seed> <side> <ncside> <n_part> <n_steps>\n", argv[0]);
@@ -424,6 +456,66 @@ void print_particles_and_cells(particle_t *particles, long long n_part, long ncs
 }*/
 
 
+void update_particles(particle_t *particles, long long n_part, long ncside,
+                cell_t **grid, double cell_side, double side, int id, int p) {
+
+
+    MPI_Request request; // will not use i think
+
+    int n_rows = ROW_SIZE(id, p, ncside);
+
+    if (id != 0) {
+        // send row to process above
+        MPI_Isend(grid[0], ncside, MPI_cell_t, id - 1, 0, MPI_COMM_WORLD, &request);
+    }
+
+    if (id != p - 1) {
+        // send row to process below
+        MPI_Isend(grid[ROW_SIZE(id, p, ncside) - 1], ncside, MPI_cell_t, id + 1, 0, MPI_COMM_WORLD, &request);
+    }
+
+
+    for (long x = 0; x < n_rows; x++) {
+        for (long y = 0; y < ncside; y++) {
+            
+            cell_t *cell = &grid[x][y];
+            int cell_num_particles = cell->index;
+            particle_t *particles = cell->particles;
+
+            for (long long i = 0; i < cell_num_particles; i++) {
+
+                double px = particles[i].x;
+                double py = particles[i].y;
+                double pm = particles[i].m;
+
+                double force_x = 0.0;
+                double force_y = 0.0;
+
+                // Add force from other particles in the same cell
+                for (long long j = 0; j < cell_num_particles; j++) {
+
+                    if (i == j) continue;
+
+                    double distance_x = particles[j].x - px;
+                    double distance_y = particles[j].y - py;
+                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
+
+                    force_x += GRAV_FORCE(pm, particles[j].m, distance) * (distance_x / distance);
+                    force_y += GRAV_FORCE(pm, particles[j].m, distance) * (distance_y / distance);
+
+                }
+
+
+                // Receive neighboring cells here or finish the loop and only add neighboring cells after
+                // Don't know what is best
+            }
+            
+        }
+    }
+              
+
+}
+
 int main(int argc, char **argv)
 {
     double exec_time;
@@ -444,6 +536,9 @@ int main(int argc, char **argv)
     parse_args(argc, argv, &seed, &side, &ncside, &n_part, &time_steps);
 
     MPI_Init (&argc, &argv);
+
+    create_mpi_particle();
+    create_mpi_cell();
 
     MPI_Comm_rank (MPI_COMM_WORLD, &id);
     MPI_Comm_size (MPI_COMM_WORLD, &p);
