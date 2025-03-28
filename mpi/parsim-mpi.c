@@ -456,23 +456,48 @@ void print_particles_and_cells(particle_t *particles, long long n_part, long ncs
 }*/
 
 
+void calculate_center_of_mass(long long n_part, long ncside, cell_t **grid, double cell_side, int id, int p) {
+
+    long size = ROW_SIZE(id, p, ncside);
+
+    for (long i = 0; i < size; i++) {
+        for (long j = 0; j < ncside; j++) {
+            grid[i][j].m = 0.0;
+            grid[i][j].x = 0.0;
+            grid[i][j].y = 0.0;
+
+            for (long idx = 0; idx < grid[i][j].index; idx++) {
+                grid[i][j].m += grid[i][j].particles[idx].m;
+                grid[i][j].x += grid[i][j].particles[idx].x * grid[i][j].particles[idx].m;
+                grid[i][j].y += grid[i][j].particles[idx].y * grid[i][j].particles[idx].m;
+            }
+        }
+    }
+
+    // Divide by the number of particles in the cell to get the center of mass
+    for (long i = 0; i < size; i++) {
+        for (long j = 0; j < ncside; j++) {
+            if (grid[i][j].m > 0) {
+                grid[i][j].x /= grid[i][j].m;
+                grid[i][j].y /= grid[i][j].m;
+            }
+        }
+    }
+}
+
+
 void update_particles(particle_t *particles, long long n_part, long ncside,
                 cell_t **grid, double cell_side, double side, int id, int p) {
-
 
     MPI_Request request; // will not use i think
 
     int n_rows = ROW_SIZE(id, p, ncside);
 
-    if (id != 0) {
-        // send row to process above
-        MPI_Isend(grid[0], ncside, MPI_cell_t, id - 1, 0, MPI_COMM_WORLD, &request);
-    }
+    int above = (id - 1 + p) % p;
+    int below = (id + 1) % p;
 
-    if (id != p - 1) {
-        // send row to process below
-        MPI_Isend(grid[ROW_SIZE(id, p, ncside) - 1], ncside, MPI_cell_t, id + 1, 0, MPI_COMM_WORLD, &request);
-    }
+    MPI_Isend(grid[0], ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &request);
+    MPI_Isend(grid[ROW_SIZE(id, p, ncside) - 1], ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &request);
 
 
     for (long x = 0; x < n_rows; x++) {
@@ -561,17 +586,16 @@ int main(int argc, char **argv)
 
     {
         init_process_particles(seed, side, ncside, n_part, grid, id, p);
-            
 
-        //calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+        calculate_center_of_mass(n_part, ncside, grid, cell_side, id, p);
+            
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
 
             //print_particles_and_cells(particles, n_part, ncside, grid);
             // TODO: update_particles MPI not implemented
             //update_particles(particles, n_part, ncside, grid, cell_side, side, id, p);
-            //n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
-            //printf("%.3lf %.3lf %lld %lld\n", particles[0].x, particles[0].y, particles[0].id, n_part);
+            //calculate_center_of_mass
             // TODO: detect_collisions MPI not implemented
             //total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
