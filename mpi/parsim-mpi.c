@@ -465,9 +465,8 @@ int main(int argc, char **argv)
     exec_time = -omp_get_wtime();
 
     {
-        //n_part = divide_by_processes(particles, n_part, ncside, grid, cell_side, id, p);
+        init_process_particles(seed, side, ncside, n_part, grid, id, p);
 
-        init_process_particles(seed, side, ncside, n_part / (ncside * ncside), grid, id, p);
             
         //calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
@@ -486,13 +485,10 @@ int main(int argc, char **argv)
     // TODO: this won't work if particle 0 moves rows and stops being at index 0
     //if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
-    //free(particles);
     for (long i = 0; i < process_assigned_rows; i++) {
-        for (long j = 0; j < ncside; j++) {
-            free(grid[i][j].particles);
-        }
         free(grid[i]);
     }
+    free(grid);
 
     
     exec_time += omp_get_wtime();

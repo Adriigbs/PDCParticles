@@ -99,6 +99,21 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
 
             add_particle_to_cell(&grid[row][col], particle);
 
+            grid[row][col].m += particle.m;
+            grid[row][col].x += particle.x * particle.m;
+            grid[row][col].y += particle.y * particle.m;
+
+        }
+    }
+
+    // Divide by the number of particles in the cell to get the center of mass
+    for (int i = 0; i < ROW_SIZE(process_id, num_processes, ncside); i++) {
+        for (int j = 0; j < ncside; j++) {
+
+            if (grid[i][j].m > 0) {
+                grid[i][j].x /= grid[i][j].m;
+                grid[i][j].y /= grid[i][j].m;
+            }
         }
     }
 
