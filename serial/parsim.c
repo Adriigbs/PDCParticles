@@ -155,9 +155,6 @@ void update_particles(particle_t *all_particles, long long n_part, long ncside, 
 
                 }
 
-                if (particles[i] - all_particles == 661) printf("particles[661].x = %.15lf, particles[661].y = %.15lf\n", all_particles[661].x, all_particles[661].y);
-
-                if (particles[i] - all_particles == 661) printf("force before: %.15lf\n", force_x);
                 // Add force from neighboring cells
                 for (long dx = -1; dx <= 1; dx++) {
                     for (long dy = -1; dy <= 1; dy++) {
@@ -189,7 +186,6 @@ void update_particles(particle_t *all_particles, long long n_part, long ncside, 
                     }
                 }
 
-                if (particles[i] - all_particles == 661) printf("force after: %.15lf\n", force_x);
                 particles[i]->gravity_x = force_x;
                 particles[i]->gravity_y = force_y;
             }

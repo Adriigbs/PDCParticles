@@ -8,6 +8,12 @@
 #define ROW_HIGH(id, p, n) ((id < n % p) ? (id + 1) * (n / p + 1) : (id + 1) * (n / p) + n % p)
 #define ROW_SIZE(id, p, n) ((id < n % p) ? (n / p + 1) : (n / p))
 
+// used to create an MPI datatype
+typedef struct center_of_mass {
+    double x, y;
+    double m;
+} center_of_mass;
+
 typedef struct cell_t {
     double x, y;
     double m;
