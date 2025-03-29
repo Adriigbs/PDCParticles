@@ -55,6 +55,18 @@ void create_mpi_particle() {
     MPI_Type_commit(&MPI_particle_t);
 }
 
+
+void add_particel_to_buffer(particle_t *particles, int index, int size, particle_t particle) {
+    if (index >= size) {
+        particles = (particle_t*) realloc(particles, 2 * size * sizeof(particle_t));
+        size *= 2;
+    }
+
+    particles[index] = particle;
+    index++;
+}
+
+
 void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, long long *n_part, long *n_steps) {
     if(argc != 6) {
         fprintf(stderr, "Usage: %s <seed> <side> <ncside> <n_part> <n_steps>\n", argv[0]);
@@ -68,331 +80,8 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 }
 
 
-void reset_grid(long ncside, cell_t grid[][ncside]) {
-    for (long i = 0; i < ncside; i++) {
-        for (long j = 0; j < ncside; j++) {
-            grid[i][j].m = 0.0;
-            grid[i][j].x = 0.0;
-            grid[i][j].y = 0.0;
-            grid[i][j].n_particles = 0;
-            grid[i][j].index = 0;
-            grid[i][j].particles = NULL;
-        }
-    }
-}
-
-
-void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
-
-    for (long long i = 0; i < n_part; i++) {
-
-        // Skip disabled particles
-        if (particles[i].m == 0) continue;
-
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
-
-        if (x >= ncside) x = ncside - 1;
-        if (y >= ncside) y = ncside - 1;
-
-        // maybe usar um lock por cell?
-        {
-            grid[y][x].particles[grid[y][x].index] = particles[i];
-            grid[y][x].index++;
-        }
-        
-    }
-
-}
 
 /*
-// Calculates center of mass, allocates grid particles and reallocates main particle array
-long long divide_by_processes(particle_t *particles, long long n_part, long ncside,
-                              cell_t grid[][ncside], double cell_side, int id, int p) {
-    
-    long long new_n_part = 0;
-    reset_grid(ncside, grid);
-    
-    for (long long i = 0; i < n_part; i++) {
-
-        // Skip disabled particles
-        if (particles[i].m == 0) continue;
-
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
-
-        if (x >= ncside) x = ncside - 1;
-        if (y >= ncside) y = ncside - 1;
-
-        // If process is responsible for this grid's row
-        if (y % p == id) {
-            grid[y][x].m += particles[i].m;
-            grid[y][x].x += particles[i].x * particles[i].m;
-            grid[y][x].y += particles[i].y * particles[i].m;
-            grid[y][x].n_particles++;
-        }
-    }
-
-    // Compute center of mass for each cell in the rows handled by this process
-    for (long i = id; i < ncside; i += p) {
-        for (long j = 0; j < ncside; j++) {
-
-            if (grid[i][j].n_particles == 0) {
-                grid[i][j].m = 0;
-                grid[i][j].x = 0;
-                grid[i][j].y = 0;
-            } else {
-                grid[i][j].index = 0;
-                grid[i][j].x /= grid[i][j].m;
-                grid[i][j].y /= grid[i][j].m;
-                grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
-            }
-        }
-    }
-
-    // Buffers for sending and receiving row data
-    double *current_row_data = (double*) malloc(ncside * 3 * sizeof(double));
-    double *recv_up = (double*) malloc(ncside * 3 * sizeof(double));
-    double *recv_down = (double*) malloc(ncside * 3 * sizeof(double));
-
-    for (long i = id; i < ncside; i += p) {
-        for (long j = 0; j < ncside; j++) {
-            current_row_data[j * 3 + 0] = grid[i][j].m;
-            current_row_data[j * 3 + 1] = grid[i][j].x;
-            current_row_data[j * 3 + 2] = grid[i][j].y;
-        }
-
-        int above = (i - 1 + ncside) % ncside;
-        int below = (i + 1 + ncside) % ncside;
-
-        int rank_above = above % p;
-        int rank_below = below % p;
-
-        MPI_Status status;
-        // if they don't belong to the same process, sendrecv
-        if (rank_above != id) {
-            MPI_Sendrecv(current_row_data, ncside * 3, MPI_DOUBLE, rank_above, 0,
-                        recv_down, ncside * 3, MPI_DOUBLE, rank_below, 0,
-                        MPI_COMM_WORLD, &status);
-        }
-        if (rank_below != id) {
-            MPI_Sendrecv(current_row_data, ncside * 3, MPI_DOUBLE, rank_below, 0,
-                        recv_up, ncside * 3, MPI_DOUBLE, rank_above, 0,
-                        MPI_COMM_WORLD, &status);
-        }
-        
-        for (long j = 0; j < ncside; j++) {
-            grid[above][j].m = recv_up[j * 3 + 0];
-            grid[above][j].x = recv_up[j * 3 + 1];
-            grid[above][j].y = recv_up[j * 3 + 2];
-
-            grid[below][j].m = recv_down[j * 3 + 0];
-            grid[below][j].x = recv_down[j * 3 + 1];
-            grid[below][j].y = recv_down[j * 3 + 2];
-        }
-    }
-
-    // Free allocated memory
-    free(current_row_data);
-    free(recv_up);
-    free(recv_down);
-
-    // Constructs particles array for each cell that belongs to this process
-    for (long long i = 0; i < n_part; i++) {
-
-        // Skip disabled particles
-        if (particles[i].m == 0) continue;
-
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
-
-        if (x >= ncside) x = ncside - 1;
-        if (y >= ncside) y = ncside - 1;
-
-        // If process is responsible for this grid's row
-        if (y % p == id) {
-            particles[new_n_part++] = particles[i];
-
-            grid[y][x].particles[grid[y][x].index] = &particles[new_n_part - 1];
-            grid[y][x].index++;
-        }
-    }
-
-    // reallocates the necessary memory for the particles array
-    particles = (particle_t*) realloc(particles, new_n_part * sizeof(particle_t));
-    return new_n_part; 
-}
-
-// Calculate the center of mass of each cell
-void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, long seed) {
-
-    reset_grid(ncside, grid); // not sure if this will be necessary at the end
-
-    for(long long i = 0; i < n_part; i++) {
-
-        // Skip disabled particles
-        if (particles[i].m == 0) continue;
-
-        // Calculate the cell in which the particle is located
-        long x = particles[i].x / cell_side;
-        long y = particles[i].y / cell_side;
-
-        if (x >= ncside) x = ncside - 1;
-        if (y >= ncside) y = ncside - 1;
-
-        // Sum the mass and position of the particle to the cell
-
-        grid[y][x].m += particles[i].m;
-        grid[y][x].x += particles[i].x * particles[i].m;
-        grid[y][x].y += particles[i].y * particles[i].m;
-        grid[y][x].n_particles++;
-        
-    }
-
-    // Divide by the number of particles in the cell to get the center of mass
-    for (long i = 0; i < ncside; i++) {
-        for (long j = 0; j < ncside; j++) {
-
-            if (grid[i][j].n_particles == 0) {
-                grid[i][j].m = 0;
-                grid[i][j].x = 0;
-                grid[i][j].y = 0;
-            } else {
-                grid[i][j].index = 0;
-                grid[i][j].x /= grid[i][j].m;
-                grid[i][j].y /= grid[i][j].m;
-                grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
-            }
-        }
-    }
-
-    split_particles_by_cell(particles, n_part, ncside, grid, cell_side);
-}
-
-void update_particles(particle_t *particles, long long n_part, long ncside,
-                      cell_t grid[][ncside], double cell_side, double side, int id, int p) {
-
-    // Iterate over every cell belonging to this process
-    for (long x = 0; x < ncside; x++) {
-        for (long y = id; y < ncside; y += p) {
-            
-            cell_t *cell = &grid[y][x];
-            particle_t **particles = cell->particles;
-            
-            // Iterate over every particle from each cell
-            for (long long i = 0; i < cell->n_particles; i++) {
-
-                if (particles[i]->m == 0) continue;
-
-                double px = particles[i]->x;
-                double py = particles[i]->y;
-                double pm = particles[i]->m;
-
-                double force_x = 0.0;
-                double force_y = 0.0;
-
-                // Add force from other particles in the same cell
-                for (long long j = 0; j < cell->n_particles; j++) {
-
-                    if (i == j) continue;
-                    if (particles[j]->m == 0) continue;
-
-                    double distance_x = cell->particles[j]->x - px;
-                    double distance_y = cell->particles[j]->y - py;
-                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
-
-                    force_x += GRAV_FORCE(pm, cell->particles[j]->m, distance) * (distance_x / distance);
-                    force_y += GRAV_FORCE(pm, cell->particles[j]->m, distance) * (distance_y / distance);
-
-                }
-
-                // Add force from neighboring cells
-                for (long dx = -1; dx <= 1; dx++) {
-                    for (long dy = -1; dy <= 1; dy++) {
-
-                        if (dx == 0 && dy == 0) continue; // skip own cell
-
-                        long nx = (x + dx + ncside) % ncside; // Wrap around edges
-                        long ny = (y + dy + ncside) % ncside;
-
-                        cell_t *neighbor_cell = &grid[ny][nx];
-
-                        // Compute force from center of mass of the cell
-                        double distance_x = neighbor_cell->x - px;
-                        double distance_y = neighbor_cell->y - py;
-
-                        if (x + dx >= ncside) distance_x += side;
-                        if (x + dx < 0) distance_x -= side;
-                        if (y + dy >= ncside) distance_y += side;
-                        if (y + dy < 0) distance_y -= side;
-
-                        double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // avoid division by zero
-
-                        force_x += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_x / distance);
-                        force_y += GRAV_FORCE(pm, neighbor_cell->m, distance) * (distance_y / distance);
-
-                        if (i == 0) {
-                            //printf("P%lld/C%ld mag: %.6lf fx: %.6lf fy: %.6lf\n", i, cell_index, distance, force_x, force_y);
-                        }
-                    }
-                }
-
-                particles[i]->gravity_x = force_x;
-                particles[i]->gravity_y = force_y;
-            }
-
-        }
-
-    }
-
-    // Update position and speed of particles
-    for (long x = 0; x < ncside; x++) {
-        for (long y = id; y < ncside; y += p) {
-
-            cell_t *cell = &grid[y][x];
-            particle_t **particles = cell->particles;
-
-            // Iterate over every particle from each cell
-            for (long long i = 0; i < cell->n_particles; i++) {
-
-                if (particles[i]->m == 0) continue;
-
-                double acceleration_x = particles[i]->gravity_x / particles[i]->m;
-                double acceleration_y = particles[i]->gravity_y / particles[i]->m;
-    
-                // Update position
-                particles[i]->x = POSITION(particles[i]->x, particles[i]->vx, acceleration_x, DELTA);
-                particles[i]->y = POSITION(particles[i]->y, particles[i]->vy, acceleration_y, DELTA);
-    
-                // Update speed
-                particles[i]->vx = SPEED(particles[i]->vx, acceleration_x, DELTA);
-                particles[i]->vy = SPEED(particles[i]->vy, acceleration_y, DELTA);
-    
-                // Wrap-around
-                particles[i]->x = fmod(particles[i]->x + side, side);
-                particles[i]->y = fmod(particles[i]->y + side, side);
-
-                // TODO: if new position is in different row, send it (and receive)
-            }  
-        }
-    }
-
-}
-
-
-void disable_particle(particle_t *particles, long long *n_part, 
-    long long index_to_remove) {
-
-    if (index_to_remove < 0 || index_to_remove >= *n_part) {
-        printf("Invalid index for removal %lld\n", index_to_remove);
-        return;
-    }
-
-    particles[index_to_remove].m = 0;
-
-}
-
-
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
     int *to_remove = (int*) calloc(*n_part, sizeof(int));
@@ -436,24 +125,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
     free(to_remove);  // Clean up memory
     return collisions;
 }
-
-void print_particles_and_cells(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside]) {
-    // Print particles
-    for (long long i = 0; i < n_part; i++) {
-        printf("Particle %lld: mass=%.6f x=%.6f y=%.6f vx=%.6f vy=%.6f\n",
-               i, particles[i].m, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
-    }
-
-    // Print cells
-    long cell_index = 0;
-    for (long i = 0; i < ncside; i++) {
-        for (long j = 0; j < ncside; j++) {
-            printf("Cell %ld x: %.6f y: %.6f m: %.6f\n",
-                   cell_index, grid[i][j].x, grid[i][j].y, grid[i][j].m);
-            cell_index++;
-        }
-    }
-}*/
+*/
 
 
 void calculate_center_of_mass(long ncside, cell_t **grid, int id, int p) {
@@ -496,6 +168,8 @@ void update_particles(long long n_part, long ncside,
     int request_count = 0;
 
     int n_rows = ROW_SIZE(id, p, ncside);
+    int process_low = ROW_LOW(id, p, ncside);
+    int process_high = ROW_HIGH(id, p, ncside);
 
     int above = (id - 1 + p) % p;
     int below = (id + 1) % p;
@@ -607,6 +281,21 @@ void update_particles(long long n_part, long ncside,
     free(recv_above);
     free(recv_below);
 
+    int initial_size = 5;
+    particle_t *above_particles_to_send = (particle_t*) malloc(initial_size * sizeof(particle_t));
+    particle_t *below_particles_to_send = (particle_t*) malloc(initial_size * sizeof(particle_t));
+    particle_t *above_particles_to_recv;
+    particle_t *below_particles_to_recv;
+
+    int above_particles_count = 0;
+    int below_particles_count = 0;
+    int recv_above_particles_count;
+    int recv_below_particles_count;
+
+
+    MPI_Request particle_requests[4];
+    int particle_request_count = 0;
+
     // Update position and speed of particles
     for (long y = 0; y < n_rows; y++) {
         for (long x = 0; x < ncside; x++) {
@@ -618,6 +307,8 @@ void update_particles(long long n_part, long ncside,
             for (long long i = 0; i < cell->index; i++) {
 
                 if (particles[i].m == 0) continue;
+
+                particle_t particle = particles[i];
 
                 double acceleration_x = particles[i].gravity_x / particles[i].m;
                 double acceleration_y = particles[i].gravity_y / particles[i].m;
@@ -633,11 +324,75 @@ void update_particles(long long n_part, long ncside,
                 // Wrap-around
                 particles[i].x = fmod(particles[i].x + side, side);
                 particles[i].y = fmod(particles[i].y + side, side);
+
+                int new_row = particles[i].y / cell_side;
+                int new_col = particles[i].x / cell_side;
+
+                if (new_row >= ncside) new_row = ncside - 1;
+                if (new_col >= ncside) new_col = ncside - 1;
+
+                if (new_row >= process_low && new_row < process_high) {
+                    remove_particle_from_cell(cell, i);
+                    add_particle_to_cell(&grid[new_row-process_low][new_col], particles[i]);
+                } else if (new_row < process_low) {
+                    remove_particle_from_cell(cell, i);
+                    add_particel_to_buffer(above_particles_to_send, above_particles_count, initial_size, particles[i]);
+                    above_particles_count++;
+                } else if (new_row >= process_high) {
+                    remove_particle_from_cell(cell, i);
+                    add_particel_to_buffer(below_particles_to_send, below_particles_count, initial_size, particles[i]);
+                    below_particles_count++;
+                }
             }  
         }
     }
 
-    // TODO: send particles that moved to row belonging to different process to that process
+    MPI_Sendrecv(&above_particles_count, 1, MPI_INT, above, 0, &recv_above_particles_count, 1, MPI_INT, above, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&below_particles_count, 1, MPI_INT, below, 0, &recv_below_particles_count, 1, MPI_INT, below, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    above_particles_to_recv = (particle_t*) malloc(recv_above_particles_count * sizeof(particle_t));
+    below_particles_to_recv = (particle_t*) malloc(recv_below_particles_count * sizeof(particle_t));
+
+    // Send particles to neighboring processes
+    MPI_Isend(above_particles_to_send, above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+    MPI_Isend(below_particles_to_send, below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+    MPI_Irecv(above_particles_to_recv, recv_above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+    MPI_Irecv(below_particles_to_recv, recv_below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+
+    MPI_Waitall(particle_request_count, particle_requests, MPI_STATUSES_IGNORE);
+
+    /*
+    for (long i = 0; i < recv_above_particles_count; i++) {
+        double x = above_particles_to_recv[i].x;
+        double y = above_particles_to_recv[i].y;
+
+        int row = y / cell_side;
+        int col = x / cell_side;
+
+        if (col >= ncside) col = ncside - 1;
+        if (row >= ncside) row = ncside - 1;
+
+        add_particle_to_cell(&grid[0][col], above_particles_to_recv[i]);
+    }
+    */
+
+    /*
+    for (long i = 0; i < recv_below_particles_count; i++) {
+        double x = below_particles_to_recv[i].x;
+        double y = below_particles_to_recv[i].y;
+
+        int row = y / cell_side;
+        int col = x / cell_side;
+
+        if (col >= ncside) col = ncside - 1;
+        if (row >= ncside) row = ncside - 1;
+
+        add_particle_to_cell(&grid[n_rows-1][col], below_particles_to_recv[i]);
+    }
+    */
+
+
+
 }
 
 
@@ -703,8 +458,6 @@ int main(int argc, char **argv)
         }
     }
 
-    // TODO: this won't work if particle 0 moves rows and stops being at index 0
-    //if (particles[0].id == 0) printf("%.3lf %.3lf\n%ld\n", particles[0].x, particles[0].y, total_num_collisions);
 
     // this is very convoluted, there's definitely a better way
     for (long i = 0; i < ROW_SIZE(id,p,ncside); i++) {
