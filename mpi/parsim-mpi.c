@@ -45,14 +45,22 @@ void create_mpi_particle() {
     MPI_Aint displacements[8];
     MPI_Datatype types[8] = {MPI_LONG_LONG, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
 
-    displacements[0] = offsetof(particle_t, id);
-    displacements[1] = offsetof(particle_t, x);
-    displacements[2] = offsetof(particle_t, y);
-    displacements[3] = offsetof(particle_t, vx);
-    displacements[4] = offsetof(particle_t, vy);
-    displacements[5] = offsetof(particle_t, m);
-    displacements[6] = offsetof(particle_t, gravity_x);
-    displacements[7] = offsetof(particle_t, gravity_y);
+    particle_t temp_particle;
+    MPI_Aint base_address;
+
+    MPI_Get_address(&temp_particle, &base_address);
+    MPI_Get_address(&temp_particle.id, &displacements[0]);
+    MPI_Get_address(&temp_particle.x, &displacements[1]);
+    MPI_Get_address(&temp_particle.y, &displacements[2]);
+    MPI_Get_address(&temp_particle.vx, &displacements[3]);
+    MPI_Get_address(&temp_particle.vy, &displacements[4]);
+    MPI_Get_address(&temp_particle.m, &displacements[5]);
+    MPI_Get_address(&temp_particle.gravity_x, &displacements[6]);
+    MPI_Get_address(&temp_particle.gravity_y, &displacements[7]);
+
+    for (int i = 0; i < 8; i++) {
+        displacements[i] -= base_address;
+    }
 
     MPI_Type_create_struct(8, block_lengths, displacements, types, &MPI_particle_t);
     MPI_Type_commit(&MPI_particle_t);
@@ -233,13 +241,16 @@ void update_positions(long long n_part, long ncside,
                             }
 
 
-                            long long initial_num = cell->index;
+                            long long i = 0;
                             // Iterate over every particle from each cell
-                            for (long long i = 0; i < initial_num; i++) {
+                            while (i < cell->index) {
                 
                                 if (i >= cell->index) break;
 
-                                if (particles[i].m == 0) continue; // Skip disabled particles
+                                if (particles[i].m == 0) {
+                                    i++;
+                                    continue;
+                                }
                 
                                 if (i < 0 || i >= cell->index) {
                                     printf("ERROR: Invalid index %d in update_positions, num_particles=%d\n", i, cell->index);
@@ -271,6 +282,7 @@ void update_positions(long long n_part, long ncside,
                                 new_row -= process_low; // get local row
                 
                                 if (new_row == y && new_col == x) { // didn't move cells
+                                    i++;
                                     continue;
                                 }
                 
@@ -346,8 +358,12 @@ void update_positions(long long n_part, long ncside,
                             if (row >= ncside) row = ncside - 1;
                     
                             row -= process_low;
-                    
-                            add_particle_to_cell(&grid[0][col], above_particles_to_recv[i]);
+                            
+                            particle_t copy = copy_particle(&above_particles_to_recv[i]);
+
+                            printf("row=%ld col=%ld m = %lf\n", row, col, above_particles_to_recv[i].m);
+
+                            add_particle_to_cell(&grid[0][col], copy);
                         }
 
                         free(above_particles_to_recv);
@@ -373,8 +389,12 @@ void update_positions(long long n_part, long ncside,
                             if (row >= ncside) row = ncside - 1;
                     
                             row -= process_low;
+
+                            particle_t copy = copy_particle(&below_particles_to_recv[i]);
+
+                            printf("row=%ld col=%ld m = %lf\n", row, col, below_particles_to_recv[i].m);
                     
-                            add_particle_to_cell(&grid[n_rows-1][col], below_particles_to_recv[i]);
+                            add_particle_to_cell(&grid[n_rows-1][col], copy);
                         }
                         free(below_particles_to_recv);
                     }
