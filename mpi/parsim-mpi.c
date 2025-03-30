@@ -219,7 +219,10 @@ void update_positions(long long n_part, long ncside,
                     long recv_above_particles_count;
                     long recv_below_particles_count;
                 
-                    MPI_Request particle_requests[4];
+                    MPI_Request above_send_request;
+                    MPI_Request below_send_request;
+                    MPI_Request above_request;
+                    MPI_Request below_request;
                     int particle_request_count = 0;
                 
                     // Update position and speed of particles
@@ -314,10 +317,10 @@ void update_positions(long long n_part, long ncside,
                     
                     
                     if (above_particles_count > 0) {
-                        MPI_Isend(above_particles_to_send, above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+                        MPI_Isend(above_particles_to_send, above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &above_send_request);
                     }
                     if (below_particles_count > 0) {
-                        MPI_Isend(below_particles_to_send, below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+                        MPI_Isend(below_particles_to_send, below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &below_send_request);
                     }
                     
                     free(below_particles_to_send);
@@ -326,17 +329,22 @@ void update_positions(long long n_part, long ncside,
                     
                     if (recv_above_particles_count > 0) {
                         above_particles_to_recv = (particle_t*) malloc(recv_above_particles_count * sizeof(particle_t));
-                        MPI_Irecv(above_particles_to_recv, recv_above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+                        MPI_Irecv(above_particles_to_recv, recv_above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &above_request);
                     }
                     
                     if (recv_below_particles_count > 0) {
                         below_particles_to_recv = (particle_t*) malloc(recv_below_particles_count * sizeof(particle_t));
-                        MPI_Irecv(below_particles_to_recv, recv_below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &particle_requests[particle_request_count++]);
+                        MPI_Irecv(below_particles_to_recv, recv_below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &below_request);
                     }
 
+                    MPI_Status statuses[2];
                     
-                    if (recv_above_particles_count > 0 || recv_below_particles_count > 0) {
-                        MPI_Wait(&particle_requests[particle_request_count - 2], MPI_STATUS_IGNORE);
+                    if (recv_above_particles_count > 0) {
+                        MPI_Wait(&above_request, &statuses[0]);
+                    }
+
+                    if (recv_below_particles_count > 0) {
+                        MPI_Wait(&below_request, &statuses[1]);
                     }
                     
                 
@@ -409,6 +417,7 @@ void update_particles(long long n_part, long ncside,
                 cell_t **grid, double cell_side, double side, int id, int p) {
 
     MPI_Request requests[4];  // 2 sends + 2 receives
+    MPI_Status statuses[4];
     int request_count = 0;
 
     long n_rows = ROW_SIZE(id, p, ncside);
@@ -471,7 +480,8 @@ void update_particles(long long n_part, long ncside,
                     force_y += GRAV_FORCE(pm, particles[j].m, distance) * (distance_y / distance);
                 }
 
-                MPI_Waitall(request_count, requests, MPI_STATUSES_IGNORE);
+
+                MPI_Waitall(request_count, requests, statuses);
 
                 // Add force from neighboring cells
                 for (long dx = -1; dx <= 1; dx++) {
