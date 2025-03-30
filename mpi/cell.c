@@ -26,6 +26,10 @@ void add_particle_to_cell(cell_t *cell, particle_t particle) {
     if (cell->index >= cell->n_particles) {
         cell->particles = (particle_t*) realloc(cell->particles, 2 * cell->n_particles * sizeof(particle_t));
         cell->n_particles *= 2;
+        if (cell->particles == NULL) {
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(1);
+        }
     }
 
     cell->particles[cell->index] = particle;
