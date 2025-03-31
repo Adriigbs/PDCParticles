@@ -188,11 +188,7 @@ long detect_collisions(particle_t *particles, long ncside, cell_t **grid, int id
                 }
 
                 p1++;
-
-
             }
-            
-
         }
     }
 
@@ -237,214 +233,222 @@ void calculate_center_of_mass(long ncside, cell_t **grid, int id, int p) {
 void update_positions(long long n_part, long ncside,
                 cell_t **grid, double cell_side, double side, int id, int p) {
 
+    int n_rows = ROW_SIZE(id, p, ncside);
+    int process_low = ROW_LOW(id, p, ncside);
+    int process_high = ROW_HIGH(id, p, ncside);
+    int above = (id - 1 + p) % p;
+    int below = (id + 1) % p;
 
-                   
+    long long size_to_move = 100;
+    long long size_above = 5;
+    long long size_below = 5;
 
-                    int n_rows = ROW_SIZE(id, p, ncside);
-                    int process_low = ROW_LOW(id, p, ncside);
-                    int process_high = ROW_HIGH(id, p, ncside);
-                    int above = (id - 1 + p) % p;
-                    int below = (id + 1) % p;
+    particle_t *above_particles_to_send = (particle_t*) malloc(size_above * sizeof(particle_t));
+    particle_t *below_particles_to_send = (particle_t*) malloc(size_below * sizeof(particle_t));
+    particle_t *above_particles_to_recv;
+    particle_t *below_particles_to_recv;
+
+    long above_particles_count = 0;
+    long below_particles_count = 0;
+    long recv_above_particles_count;
+    long recv_below_particles_count;
+
+    MPI_Request above_send_request;
+    MPI_Request below_send_request;
+    MPI_Request above_request;
+    MPI_Request below_request;
+    int particle_request_count = 0;
+
+    particle_t *to_move = (particle_t*) malloc(size_to_move * sizeof(particle_t));
+    long to_move_count = 0;
+
+    // Update position and speed of particles
+    for (long y = 0; y < n_rows; y++) {
+        for (long x = 0; x < ncside; x++) {
+
+            cell_t *cell = &grid[y][x];
+            particle_t *particles = cell->particles;
+
+
+            if (cell == NULL) {
+                printf("ERROR: cell is NULL in update_positions()\n");
+                MPI_Abort(MPI_COMM_WORLD, 1);
+            }
+            
+            if (particles == NULL) {
+                printf("ERROR: particle_array is NULL in update_positions()\n");
+                MPI_Abort(MPI_COMM_WORLD, 1);
+            }
+
+
+            long long i = 0;
+            // Iterate over every particle from each cell
+            while (i < cell->index) {
+
+                if (i >= cell->index) break;
+
+                if (particles[i].m == 0) {
+                    i++;
+                    continue;
+                }
+
+                if (i < 0 || i >= cell->index) {
+                    printf("ERROR: Invalid index %lld in update_positions, num_particles=%lld\n", i, cell->index);
+                    fflush(stdout);
+                    MPI_Abort(MPI_COMM_WORLD, 1);
+                }
+
+                
+                double acceleration_x = particles[i].gravity_x / particles[i].m;
+                double acceleration_y = particles[i].gravity_y / particles[i].m;
     
-                    long long size_above = 5;
-                    long long size_below = 5;
-                
-                    particle_t *above_particles_to_send = (particle_t*) malloc(size_above * sizeof(particle_t));
-                    particle_t *below_particles_to_send = (particle_t*) malloc(size_below * sizeof(particle_t));
-                    particle_t *above_particles_to_recv;
-                    particle_t *below_particles_to_recv;
-                
-                    long above_particles_count = 0;
-                    long below_particles_count = 0;
-                    long recv_above_particles_count;
-                    long recv_below_particles_count;
-                
-                    MPI_Request above_send_request;
-                    MPI_Request below_send_request;
-                    MPI_Request above_request;
-                    MPI_Request below_request;
-                    int particle_request_count = 0;
-                
-                    // Update position and speed of particles
-                    for (long y = 0; y < n_rows; y++) {
-                        for (long x = 0; x < ncside; x++) {
-                
-                            cell_t *cell = &grid[y][x];
-                            particle_t *particles = cell->particles;
-
-
-                            if (cell == NULL) {
-                                printf("ERROR: cell is NULL in update_positions()\n");
-                                MPI_Abort(MPI_COMM_WORLD, 1);
-                            }
-                            
-                            if (particles == NULL) {
-                                printf("ERROR: particle_array is NULL in update_positions()\n");
-                                MPI_Abort(MPI_COMM_WORLD, 1);
-                            }
-
-
-                            long long i = 0;
-                            // Iterate over every particle from each cell
-                            while (i < cell->index) {
-                
-                                if (i >= cell->index) break;
-
-                                if (particles[i].m == 0) {
-                                    i++;
-                                    continue;
-                                }
-                
-                                if (i < 0 || i >= cell->index) {
-                                    printf("ERROR: Invalid index %d in update_positions, num_particles=%d\n", i, cell->index);
-                                    fflush(stdout);
-                                    MPI_Abort(MPI_COMM_WORLD, 1);
-                                }
-
-                                
-                                double acceleration_x = particles[i].gravity_x / particles[i].m;
-                                double acceleration_y = particles[i].gravity_y / particles[i].m;
-                    
-                                // Update position
-                                particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
-                                particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
-                    
-                                // Update speed
-                                particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
-                                particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
-                    
-                                // Wrap-around column
-                                particles[i].x = fmod(particles[i].x + side, side);
-                
-                                long new_row = particles[i].y / cell_side;
-                                long new_col = particles[i].x / cell_side;
-                
-                                if (new_row >= ncside) new_row = ncside - 1;
-                                if (new_col >= ncside) new_col = ncside - 1;
-                
-                                new_row -= process_low; // get local row
-                
-                                if (new_row == y && new_col == x) { // didn't move cells
-                                    i++;
-                                    continue;
-                                }
-                
-                                particle_t copy = copy_particle(&particles[i]);
-                
-                                if (new_row >= 0 && new_row < n_rows) { // moved cells locally
-                                    particles[i].y = fmod(particles[i].y + side, side);
-                                    remove_particle_from_cell(cell, i);
-                                    add_particle_to_cell(&grid[new_row][new_col], copy);
-                
-                                } else if (new_row < 0) {
-                                    particles[i].y = fmod(particles[i].y + side, side);
-                                    remove_particle_from_cell(cell, i);
-                                    add_particle_to_buffer(&above_particles_to_send, &above_particles_count, &size_above, copy);
-                                    
-                                } else if (new_row >= n_rows) {
-                                    particles[i].y = fmod(particles[i].y + side, side);
-                                    remove_particle_from_cell(cell, i);
-                                    add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
-                                }
-                            }  
-                        }
-                    }
-                
-                    MPI_Sendrecv(&above_particles_count, 1, MPI_LONG, above, 0, &recv_below_particles_count, 1, MPI_LONG, below, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    MPI_Sendrecv(&below_particles_count, 1, MPI_LONG, below, 0, &recv_above_particles_count, 1, MPI_LONG, above, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                
-
-                    
-                    
-                    if (above_particles_count > 0) {
-                        MPI_Isend(above_particles_to_send, above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &above_send_request);
-                    }
-                    if (below_particles_count > 0) {
-                        MPI_Isend(below_particles_to_send, below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &below_send_request);
-                    }
-                    
-                    free(below_particles_to_send);
-                    free(above_particles_to_send);
-                    
-                    
-                    if (recv_above_particles_count > 0) {
-                        above_particles_to_recv = (particle_t*) malloc(recv_above_particles_count * sizeof(particle_t));
-                        MPI_Irecv(above_particles_to_recv, recv_above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &above_request);
-                    }
-                    
-                    if (recv_below_particles_count > 0) {
-                        below_particles_to_recv = (particle_t*) malloc(recv_below_particles_count * sizeof(particle_t));
-                        MPI_Irecv(below_particles_to_recv, recv_below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &below_request);
-                    }
-
-                    MPI_Status statuses[2];
-                    
-                    if (recv_above_particles_count > 0) {
-                        MPI_Wait(&above_request, &statuses[0]);
-                    }
-
-                    if (recv_below_particles_count > 0) {
-                        MPI_Wait(&below_request, &statuses[1]);
-                    }
-                    
-                
-                    if (recv_above_particles_count > 0) {
-                        for (long i = 0; i < recv_above_particles_count; i++) {
-
-                            if (above_particles_to_recv == NULL) {
-                                printf("ERROR: above_particles_to_recv is NULL in update_positions()\n");
-                                MPI_Abort(MPI_COMM_WORLD, 1);
-                            }
-
-                            double x = above_particles_to_recv[i].x;
-                            double y = above_particles_to_recv[i].y;
-                    
-                            long row = y / cell_side;
-                            long col = x / cell_side;
-                    
-                            if (col >= ncside) col = ncside - 1;
-                            if (row >= ncside) row = ncside - 1;
-                    
-                            row -= process_low;
-                            
-                            particle_t copy = copy_particle(&above_particles_to_recv[i]);
-
-                            add_particle_to_cell(&grid[0][col], copy);
-                        }
-
-                        free(above_particles_to_recv);
-                    }
-                
-
-                    if (recv_below_particles_count > 0) {
-                        for (long i = 0; i < recv_below_particles_count; i++) {
-
-
-                            if (below_particles_to_recv == NULL) {
-                                printf("ERROR: below_particles_to_recv is NULL in update_positions()\n");
-                                MPI_Abort(MPI_COMM_WORLD, 1);
-                            }
-
-                            double x = below_particles_to_recv[i].x;
-                            double y = below_particles_to_recv[i].y;
-                    
-                            long row = y / cell_side;
-                            long col = x / cell_side;
-                    
-                            if (col >= ncside) col = ncside - 1;
-                            if (row >= ncside) row = ncside - 1;
-                    
-                            row -= process_low;
-
-                            particle_t copy = copy_particle(&below_particles_to_recv[i]);
-                    
-                            add_particle_to_cell(&grid[n_rows-1][col], copy);
-                        }
-                        free(below_particles_to_recv);
-                    }
-                
-                
+                // Update position
+                particles[i].x = POSITION(particles[i].x, particles[i].vx, acceleration_x, DELTA);
+                particles[i].y = POSITION(particles[i].y, particles[i].vy, acceleration_y, DELTA);
     
+                // Update speed
+                particles[i].vx = SPEED(particles[i].vx, acceleration_x, DELTA);
+                particles[i].vy = SPEED(particles[i].vy, acceleration_y, DELTA);
+    
+                // Wrap-around column
+                particles[i].x = fmod(particles[i].x + side, side);
+
+                long new_row = particles[i].y / cell_side;
+                long new_col = particles[i].x / cell_side;
+
+                if (new_row >= ncside) new_row = ncside - 1;
+                if (new_col >= ncside) new_col = ncside - 1;
+
+                new_row -= process_low; // get local row
+
+                if (new_row == y && new_col == x) { // didn't move cells
+                    i++;
+                    continue;
+                }
+
+                particle_t copy = copy_particle(&particles[i]);
+
+                if (new_row >= 0 && new_row < n_rows) { // moved cells locally
+                    particles[i].y = fmod(particles[i].y + side, side);
+                    remove_particle_from_cell(cell, i);
+                    add_particle_to_buffer(&to_move, &to_move_count, &size_to_move, copy);
+                } else if (new_row < 0) {
+                    particles[i].y = fmod(particles[i].y + side, side);
+                    remove_particle_from_cell(cell, i);
+                    add_particle_to_buffer(&above_particles_to_send, &above_particles_count, &size_above, copy);
+                    
+                } else if (new_row >= n_rows) {
+                    particles[i].y = fmod(particles[i].y + side, side);
+                    remove_particle_from_cell(cell, i);
+                    add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
+                }
+            }  
+        }
+    }
+
+    MPI_Sendrecv(&above_particles_count, 1, MPI_LONG, above, 0, &recv_below_particles_count, 1, MPI_LONG, below, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&below_particles_count, 1, MPI_LONG, below, 0, &recv_above_particles_count, 1, MPI_LONG, above, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    if (above_particles_count > 0) {
+        MPI_Isend(above_particles_to_send, above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &above_send_request);
+    }
+    if (below_particles_count > 0) {
+        MPI_Isend(below_particles_to_send, below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &below_send_request);
+    }
+    
+    free(below_particles_to_send);
+    free(above_particles_to_send);
+    
+    
+    if (recv_above_particles_count > 0) {
+        above_particles_to_recv = (particle_t*) malloc(recv_above_particles_count * sizeof(particle_t));
+        MPI_Irecv(above_particles_to_recv, recv_above_particles_count, MPI_particle_t, above, 0, MPI_COMM_WORLD, &above_request);
+    }
+    
+    if (recv_below_particles_count > 0) {
+        below_particles_to_recv = (particle_t*) malloc(recv_below_particles_count * sizeof(particle_t));
+        MPI_Irecv(below_particles_to_recv, recv_below_particles_count, MPI_particle_t, below, 0, MPI_COMM_WORLD, &below_request);
+    }
+
+    for (long i = 0; i < to_move_count; i++) {
+        double x = to_move[i].x;
+        double y = to_move[i].y;
+
+        long row = y / cell_side;
+        long col = x / cell_side;
+
+        if (col >= ncside) col = ncside - 1;
+        if (row >= ncside) row = ncside - 1;
+
+        row -= process_low;
+        
+        particle_t copy = copy_particle(&to_move[i]);
+
+        add_particle_to_cell(&grid[row][col], copy);
+    }
+    free(to_move);
+
+    MPI_Status statuses[2];
+    
+    if (recv_above_particles_count > 0) {
+        MPI_Wait(&above_request, &statuses[0]);
+    }
+
+    if (recv_below_particles_count > 0) {
+        MPI_Wait(&below_request, &statuses[1]);
+    }
+    
+
+    if (recv_above_particles_count > 0) {
+        for (long i = 0; i < recv_above_particles_count; i++) {
+
+            if (above_particles_to_recv == NULL) {
+                printf("ERROR: above_particles_to_recv is NULL in update_positions()\n");
+                MPI_Abort(MPI_COMM_WORLD, 1);
+            }
+
+            double x = above_particles_to_recv[i].x;
+            double y = above_particles_to_recv[i].y;
+    
+            long row = y / cell_side;
+            long col = x / cell_side;
+    
+            if (col >= ncside) col = ncside - 1;
+            if (row >= ncside) row = ncside - 1;
+                
+            particle_t copy = copy_particle(&above_particles_to_recv[i]);
+
+            add_particle_to_cell(&grid[0][col], copy);
+        }
+
+        free(above_particles_to_recv);
+    }
+
+
+    if (recv_below_particles_count > 0) {
+        for (long i = 0; i < recv_below_particles_count; i++) {
+
+
+            if (below_particles_to_recv == NULL) {
+                printf("ERROR: below_particles_to_recv is NULL in update_positions()\n");
+                MPI_Abort(MPI_COMM_WORLD, 1);
+            }
+
+            double x = below_particles_to_recv[i].x;
+            double y = below_particles_to_recv[i].y;
+    
+            long row = y / cell_side;
+            long col = x / cell_side;
+    
+            if (col >= ncside) col = ncside - 1;
+            if (row >= ncside) row = ncside - 1;
+    
+            particle_t copy = copy_particle(&below_particles_to_recv[i]);
+    
+            add_particle_to_cell(&grid[n_rows-1][col], copy);
+        }
+        free(below_particles_to_recv);
+    }
 }
 
 
@@ -573,9 +577,6 @@ void update_particles(long long n_part, long ncside,
 
     // Update positions and speeds
     update_positions(n_part, ncside, grid, cell_side, side, id, p);
-
-    // Calculate center of mass
-    calculate_center_of_mass(ncside, grid, id, p);
 }
 
 
@@ -627,9 +628,10 @@ int main(int argc, char **argv)
         calculate_center_of_mass(ncside, grid, id, p);
             
         for (long i = 0; i < time_steps; i++) {
-            //printf("t=%ld\n", i);
+            //if (!id) printf("t=%ld\n", i);
 
             update_particles(n_part, ncside, grid, cell_side, side, id, p);
+            calculate_center_of_mass(ncside, grid, id, p);
             total_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
             MPI_Barrier (MPI_COMM_WORLD);
         }
