@@ -4,7 +4,7 @@
 typedef struct cell_t cell_t;
 
 typedef struct {
-    long long id;
+    char id;
     double x, y;
     double vx, vy;
     double m;

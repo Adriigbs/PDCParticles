@@ -81,6 +81,11 @@ particle_t copy_particle(particle_t *particle) {
     return copy;
 }
 
+void sort3(int *a, int *b, int *c) {
+    if (*a > *b) { int temp = *a; *a = *b; *b = temp; }
+    if (*a > *c) { int temp = *a; *a = *c; *c = temp; }
+    if (*b > *c) { int temp = *b; *b = *c; *c = temp; }
+}
 
 
 void add_particle_to_buffer(particle_t **particles, long *index, long long *size, particle_t particle) {
@@ -113,51 +118,86 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 
 
 
-/*
-long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
+long detect_collisions(particle_t *particles, long ncside, cell_t **grid, int id, int p) {
     long collisions = 0;
-    int *to_remove = (int*) calloc(*n_part, sizeof(int));
+    int rows = ROW_SIZE(id, p, ncside);
 
-    for (long i = 0; i < ncside; i++) {
-        for (long j = 0; j < ncside; j++) {
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
 
-            if (cell->n_particles < 2) continue;  // No collisions possible if only 0 or 1 particle
+            if (cell->index < 2) continue;  
 
-            for (long p1 = 0; p1 < cell->n_particles; p1++) {
-                if (cell->particles[p1]->m == 0) continue;  // Skip disabled particles
-                for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
-                    if (cell->particles[p2]->m == 0) continue;  // Skip disabled particles
-                    particle_t *particle1 = cell->particles[p1];
-                    particle_t *particle2 = cell->particles[p2];
-                    double dx = particle1->x - particle2->x;
-                    double dy = particle1->y - particle2->y;
+            
+            int p1 = 0;
+            while (p1 < cell->index) {
+                int collision_group[3];
+                int collision_count = 0;
+                for (long p2 = p1 + 1; p2 < cell->index; p2++) {
+
+                    particle_t particle1 = cell->particles[p1];
+                    particle_t particle2 = cell->particles[p2];
+                    double dx = particle1.x - particle2.x;
+                    double dy = particle1.y - particle2.y;
                     double distance = sqrt(dx * dx + dy * dy) + 1e-10;
 
-                    if (distance < EPSILON) {  // Collision detected
+                    if (distance < EPSILON) {  
+                        if (collision_count == 0) {
+                            collision_group[collision_count++] = p1;
+                            collision_group[collision_count++] = p2;
+                            collision_count = 1;
+                        } else if (collision_count == 1) {
+                            collision_group[collision_count++] = p2;
+                            
+                            int lower_index = collision_group[0];
+                            int middle_index = collision_group[1];
+                            int higher_index = collision_group[2];
 
-                        long long id1 = (long long)(particle1 - particles);
-                        long long id2 = (long long)(particle2 - particles);
-                        //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
-                        if (to_remove[id1] == 0 && to_remove[id2] == 0) {
-                            collisions++;
+                            sort3(&lower_index, &middle_index, &higher_index);
+
+                            remove_particle_from_cell(cell, higher_index);
+                            remove_particle_from_cell(cell, middle_index);  
+                            remove_particle_from_cell(cell, lower_index);
+                            collisions += 1;
+                            collision_count = 2;
+                            break;
                         }
                         
-                        to_remove[id1] = to_remove[id2] = 1;
-
-                        disable_particle(particles, n_part, id1);
-                        disable_particle(particles, n_part, id2);
                     }
                 }
+
+                if (collision_count == 2) continue;
+                if (collision_count == 1) {
+
+                    int lower_index;
+                    int higher_index;
+
+                    if (collision_group[0] < collision_group[1]) {
+                        lower_index = collision_group[0];
+                        higher_index = collision_group[1];
+                    } else {
+                        lower_index = collision_group[1];
+                        higher_index = collision_group[0];
+                    }
+
+                    remove_particle_from_cell(cell, higher_index);
+                    remove_particle_from_cell(cell, lower_index);
+                    collisions += 1;
+                    continue;
+
+                }
+
+                p1++;
+
+
             }
+            
 
         }
     }
 
-    free(to_remove);  // Clean up memory
     return collisions;
 }
-*/
 
 
 void calculate_center_of_mass(long ncside, cell_t **grid, int id, int p) {
@@ -369,8 +409,6 @@ void update_positions(long long n_part, long ncside,
                             
                             particle_t copy = copy_particle(&above_particles_to_recv[i]);
 
-                            printf("row=%ld col=%ld m = %lf\n", row, col, above_particles_to_recv[i].m);
-
                             add_particle_to_cell(&grid[0][col], copy);
                         }
 
@@ -399,8 +437,6 @@ void update_positions(long long n_part, long ncside,
                             row -= process_low;
 
                             particle_t copy = copy_particle(&below_particles_to_recv[i]);
-
-                            printf("row=%ld col=%ld m = %lf\n", row, col, below_particles_to_recv[i].m);
                     
                             add_particle_to_cell(&grid[n_rows-1][col], copy);
                         }
@@ -593,15 +629,11 @@ int main(int argc, char **argv)
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
 
-            // TODO: update_particles MPI not implemented
-            //if (!id) printf("%.15lf %.15lf %lld\n", grid[0][0].particles[0].x, grid[0][0].particles[0].y, grid[0][0].particles[0].id);
             update_particles(n_part, ncside, grid, cell_side, side, id, p);
-            //if (!id) printf("%.15lf %.15lf %lld\n", grid[0][0].particles[0].x, grid[0][0].particles[0].y, grid[0][0].particles[0].id);
+            total_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
             MPI_Barrier (MPI_COMM_WORLD);
-            //calculate_center_of_mass
-            // TODO: detect_collisions MPI not implemented
-            //total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
+        printf("Process %d: %ld collisions\n", id, total_num_collisions);
     }
 
 
@@ -609,8 +641,8 @@ int main(int argc, char **argv)
     for (long i = 0; i < ROW_SIZE(id,p,ncside); i++) {
         for (long j = 0; j < ncside; j++) {
             for (long idx = 0; idx < grid[i][j].index; idx++) {
-                if (grid[i][j].particles[idx].id == 0) {
-                    //printf("%.3lf %.3lf\n%ld\n", grid[i][j].particles[idx].x, grid[i][j].particles[idx].y, total_num_collisions);
+                if (grid[i][j].particles[idx].id == 1) {
+                    printf("%.3lf %.3lf\n%ld\n", grid[i][j].particles[idx].x, grid[i][j].particles[idx].y, total_num_collisions);
                 }
             }
         }

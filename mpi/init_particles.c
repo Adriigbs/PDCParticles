@@ -86,7 +86,11 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
 
         particle_t particle;
 
-        particle.id = i;
+        particle.id = 0;
+
+        if (i == 0) particle.id = 1;
+        
+
         particle.x = x;
         particle.y = y;
         particle.vx = (rnd01() - 0.5) * side / ncside / 5.0;
