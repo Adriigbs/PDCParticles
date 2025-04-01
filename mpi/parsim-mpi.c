@@ -276,6 +276,7 @@ void update_positions(long long n_part, long ncside,
     int above = (id - 1 + p) % p;
     int below = (id + 1) % p;
 
+    long long size_to_move = 10;
     long long size_above = 5;
     long long size_below = 5;
 
@@ -294,6 +295,9 @@ void update_positions(long long n_part, long ncside,
     MPI_Request above_request;
     MPI_Request below_request;
     int particle_request_count = 0;
+
+    particle_t *to_move = (particle_t*) malloc(size_to_move * sizeof(particle_t));
+    long to_move_count = 0;
 
     // Update position and speed of particles
     for (long y = 0; y < n_rows; y++)
@@ -354,7 +358,7 @@ void update_positions(long long n_part, long ncside,
                 { // moved cells locally
                     particles[i].y = fmod(particles[i].y + side, side);
                     remove_particle_from_cell(cell, i);
-                    add_particle_to_cell(&grid[new_row][new_col], copy);
+                    add_particle_to_buffer(&to_move, &to_move_count, &size_to_move, copy);
                 }
                 else if (new_row < 0)
                 {
@@ -459,6 +463,24 @@ void update_positions(long long n_part, long ncside,
     }
     free(below_particles_to_send);
     free(above_particles_to_send);
+
+    for (long i = 0; i < to_move_count; i++) {
+        double x = to_move[i].x;
+        double y = to_move[i].y;
+
+        long row = y / cell_side;
+        long col = x / cell_side;
+
+        if (col >= ncside) col = ncside - 1;
+        if (row >= ncside) row = ncside - 1;
+
+        row -= process_low;
+        
+        particle_t copy = copy_particle(&to_move[i]);
+
+        add_particle_to_cell(&grid[row][col], copy);
+    }
+    free(to_move);
 }
 
 void update_particles(long long n_part, long ncside, cell_t **grid, double cell_side, double side, int id, int p)
@@ -592,7 +614,7 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
                 particles[i].gravity_x = force_x;
                 particles[i].gravity_y = force_y;
 
-                if (particles[i].id == 1) printf("inside update particles %.5lf %.5lf\n", particles[i].gravity_x, particles[i].gravity_y);
+                // if (particles[i].id == 1) printf("inside update particles %.5lf %.5lf\n", particles[i].gravity_x, particles[i].gravity_y);
             }
         }
     }
@@ -675,28 +697,18 @@ int main(int argc, char **argv)
 
         for (long i = 0; i < time_steps; i++)
         {
-            if (!id) printf("t=%ld\n", i);
-            for (long i = 0; i < process_assigned_rows; i++) {
-                for (long j = 0; j < ncside; j++) {
-                    for (long k = 0; k < grid[i][j].index; k++) {
-                        if (grid[i][j].particles[k].id == 1) {
-                            printf("before update particles %.5lf %.5lf\n", grid[i][j].particles[k].x, grid[i][j].particles[k].y);
-                        }
-                    }
-                }
-            }
+            //if (!id) printf("t=%ld\n", i);
+           
             update_particles(n_part, ncside, grid, cell_side, side, id, p);
             calculate_center_of_mass(ncside, grid, id, p);
             process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
-            MPI_Barrier(MPI_COMM_WORLD);
-            MPI_Finalize();
-            exit(0);
+            
         }
     }
 
     if (!has_main_particle)
         MPI_Wait(&request, &status);
-
+    
     // Reduce the total number of collisions
     long total_collisions = 0;
     MPI_Reduce(&process_num_collisions, &total_collisions, 1, MPI_LONG, MPI_SUM, main_particle_process, MPI_COMM_WORLD);
@@ -704,7 +716,7 @@ int main(int argc, char **argv)
     // Print particle and collisions
     if (id == main_particle_process)
     {
-        printf("Total number of collisions: %ld\n", total_collisions);
+        //printf("Total number of collisions: %ld\n", total_collisions);
 
         for (long i = 0; i < process_assigned_rows; i++)
         {
@@ -733,6 +745,7 @@ int main(int argc, char **argv)
 
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
+    exit(0);
 
     exec_time += omp_get_wtime();
     if (!id)
