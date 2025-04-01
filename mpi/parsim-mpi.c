@@ -449,7 +449,6 @@ void update_positions(long long n_part, long ncside,
     {
         MPI_Wait(&above_request, &statuses[0]);
     }
-    MPI_Status statuses[2];
 
     if (recv_above_particles_count > 0)
     {
@@ -725,7 +724,7 @@ int main(int argc, char **argv)
 
             update_particles(n_part, ncside, grid, cell_side, side, id, p);
             calculate_center_of_mass(ncside, grid, id, p);
-            total_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
+            process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
             MPI_Barrier(MPI_COMM_WORLD);
         }
     }
