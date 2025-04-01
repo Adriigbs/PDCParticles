@@ -10,6 +10,7 @@ typedef struct
     double vx, vy;
     double m;
     double gravity_x, gravity_y;
+    //int collided;
 } particle_t;
 
 // Function prototype
