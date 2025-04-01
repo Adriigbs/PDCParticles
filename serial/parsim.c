@@ -341,8 +341,6 @@ int main(int argc, char **argv)
 
             //print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
-            printf("particles[661].x = %.15lf, particles[661].y = %.15lf\n", particles[661].x, particles[661].y);
-            exit(0);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
         }
