@@ -27,4 +27,5 @@ void add_particle_to_cell(cell_t *cell, particle_t particle);
 void remove_particle_from_cell(cell_t *cell, long long index);
 
 void init_grid(long ncside, cell_t **grid, long initial_size, int rows);
+
 #endif

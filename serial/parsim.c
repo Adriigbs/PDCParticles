@@ -194,6 +194,9 @@ void update_particles(particle_t *all_particles, long long n_part, long ncside, 
 
     }
 
+    printf("inside update particles %.5lf %.5lf\n", all_particles[0].gravity_x, all_particles[0].gravity_y);
+
+
     // Update position and speed of particles
     for (long x = 0; x < ncside; x++) {
         for (long y = 0; y < ncside; y++) {
@@ -337,14 +340,14 @@ int main(int argc, char **argv)
     {
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
-            //printf("t=%ld\n", i);
+            printf("t=%ld\n", i);
 
             //print_particles_and_cells(particles, n_part, ncside, grid);
+            printf("before update particles %.5lf %.5lf\n", particles[0].x, particles[0].y);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
-            printf("particles[661].x = %.15lf, particles[661].y = %.15lf\n", particles[661].x, particles[661].y);
-            exit(0);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+            exit(0);
         }
     }
 

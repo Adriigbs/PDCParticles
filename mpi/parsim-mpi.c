@@ -478,14 +478,26 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
     int below = (id + 1) % p;
 
     // centers of mass of highest and lowest rows, to send to neighboring processes
+    center_of_mass *send_above = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
+    center_of_mass *send_below = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
     center_of_mass *recv_above = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
     center_of_mass *recv_below = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
+    
+    for (long x = 0; x < ncside; x++) {
+        send_above[x].m = grid[0][x].m;
+        send_above[x].x = grid[0][x].x;
+        send_above[x].y = grid[0][x].y;
+        send_below[x].m = grid[n_rows - 1][x].m;
+        send_below[x].x = grid[n_rows - 1][x].x;
+        send_below[x].y = grid[n_rows - 1][x].y;
+    }
 
     MPI_Irecv(recv_above, ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &recv_requests[recv_request_count++]);
     MPI_Irecv(recv_below, ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &recv_requests[recv_request_count++]);
 
-    MPI_Isend(grid[0], ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
-    MPI_Isend(grid[n_rows - 1], ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
+
+    MPI_Isend(send_above, ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
+    MPI_Isend(send_below, ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
 
     for (long y = 0; y < n_rows; y++)
     {
@@ -510,12 +522,11 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
                 for (long long j = 0; j < cell_num_particles; j++)
                 {
 
-                    if (i == j)
-                        continue;
+                    if (i == j) continue;
 
                     double distance_x = particles[j].x - px;
                     double distance_y = particles[j].y - py;
-                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary
+                    double distance = sqrt(distance_x * distance_x + distance_y * distance_y);
 
                     force_x += GRAV_FORCE(pm, particles[j].m, distance) * (distance_x / distance);
                     force_y += GRAV_FORCE(pm, particles[j].m, distance) * (distance_y / distance);
@@ -523,6 +534,7 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
 
                 MPI_Waitall(recv_request_count, recv_requests, statuses);
 
+                // Add force from neighbouring cells
                 for (long dx = -1; dx <= 1; dx++)
                 {
                     for (long dy = -1; dy <= 1; dy++)
@@ -539,15 +551,15 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
 
                         if (y + dy >= n_rows)
                         {
-                            neighbor_cell_x = recv_below[nx].x;
-                            neighbor_cell_y = recv_below[nx].y;
-                            neighbor_cell_m = recv_below[nx].m;
-                        }
-                        else if (y + dy < 0)
-                        {
                             neighbor_cell_x = recv_above[nx].x;
                             neighbor_cell_y = recv_above[nx].y;
                             neighbor_cell_m = recv_above[nx].m;
+                        }
+                        else if (y + dy < 0)
+                        {
+                            neighbor_cell_x = recv_below[nx].x;
+                            neighbor_cell_y = recv_below[nx].y;
+                            neighbor_cell_m = recv_below[nx].m;
                         }
                         else
                         {
@@ -579,6 +591,8 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
 
                 particles[i].gravity_x = force_x;
                 particles[i].gravity_y = force_y;
+
+                if (particles[i].id == 1) printf("inside update particles %.5lf %.5lf\n", particles[i].gravity_x, particles[i].gravity_y);
             }
         }
     }
@@ -588,9 +602,6 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
 
     // Update positions and speeds
     update_positions(n_part, ncside, grid, cell_side, side, id, p);
-
-    // Calculate center of mass
-    calculate_center_of_mass(ncside, grid, id, p);
 }
 
 int main(int argc, char **argv)
@@ -664,11 +675,22 @@ int main(int argc, char **argv)
 
         for (long i = 0; i < time_steps; i++)
         {
-            // printf("t=%ld\n", i);
-
+            if (!id) printf("t=%ld\n", i);
+            for (long i = 0; i < process_assigned_rows; i++) {
+                for (long j = 0; j < ncside; j++) {
+                    for (long k = 0; k < grid[i][j].index; k++) {
+                        if (grid[i][j].particles[k].id == 1) {
+                            printf("before update particles %.5lf %.5lf\n", grid[i][j].particles[k].x, grid[i][j].particles[k].y);
+                        }
+                    }
+                }
+            }
             update_particles(n_part, ncside, grid, cell_side, side, id, p);
+            calculate_center_of_mass(ncside, grid, id, p);
             process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
             MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Finalize();
+            exit(0);
         }
     }
 
@@ -711,7 +733,6 @@ int main(int argc, char **argv)
 
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
-    exit(0);
 
     exec_time += omp_get_wtime();
     if (!id)
