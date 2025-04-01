@@ -585,7 +585,7 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
                         double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary;
 
                         force_x += GRAV_FORCE(pm, neighbor_cell_m, distance) * (distance_x / distance);
-                        force_y += GRAV_FORCE(pm, neighbor_cell_x, distance) * (distance_y / distance);
+                        force_y += GRAV_FORCE(pm, neighbor_cell_m, distance) * (distance_y / distance);
                     }
                 }
 
