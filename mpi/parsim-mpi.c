@@ -136,60 +136,40 @@ long detect_collisions(particle_t *particles, long ncside, cell_t **grid, int id
 
             if (cell->index < 2) continue;
 
-            int p1 = 0;
-            while (p1 < cell->index) {
-                int collision_group[3];
-                int collision_count = 0;
-                for (long p2 = p1 + 1; p2 < cell->index; p2++) {
+            long p1 = 0;
+            for (int p1 = 0; p1 < cell->index; p1++) {
+
+                if (cell->particles[p1].m == 0) {
+                    remove_particle_from_cell(cell, p1);
+                    continue;
+                }
+
+                long p2 = p1 + 1;
+                while (p2 < cell->index) {
 
                     particle_t particle1 = cell->particles[p1];
                     particle_t particle2 = cell->particles[p2];
                     double dx = particle1.x - particle2.x;
                     double dy = particle1.y - particle2.y;
-                    double distance = sqrt(dx * dx + dy * dy) + 1e-10;
+                    double distance = sqrt(dx * dx + dy * dy);
 
                     if (distance < EPSILON) {
-                        if (collision_count == 0) {
-                            collision_group[collision_count++] = p1;
-                            collision_group[collision_count++] = p2;
-                            collision_count = 1;
+                        if (cell->particles[p1].m != 0 && cell->particles[p2].m != 0) {
+                            collisions++;
                         }
-                        else if (collision_count == 1) {
-                            collision_group[collision_count++] = p2;
 
-                            int lower_index = collision_group[0];
-                            int middle_index = collision_group[1];
-                            int higher_index = collision_group[2];
+                        cell->particles[p1].m = 0;
+                        cell->particles[p2].m = 0;
 
-                            sort3(&lower_index, &middle_index, &higher_index);
-
-                            remove_particle_from_cell(cell, higher_index);
-                            remove_particle_from_cell(cell, middle_index);
-                            remove_particle_from_cell(cell, lower_index);
-                            collisions += 1;
-                            collision_count = 2;
-                            break;
-                        }
+                        remove_particle_from_cell(cell, p1);
+                        p2 = p1 + 1;
+                    } else {
+                        p2++;
                     }
                 }
 
-                if (collision_count == 2) continue;
-
-                if (collision_count == 1) {
-                    int lower_index;
-                    int higher_index;
-
-                    if (collision_group[0] < collision_group[1]) {
-                        lower_index = collision_group[0];
-                        higher_index = collision_group[1];
-                    } else {
-                        lower_index = collision_group[1];
-                        higher_index = collision_group[0];
-                    }
-
-                    remove_particle_from_cell(cell, higher_index);
-                    remove_particle_from_cell(cell, lower_index);
-                    collisions += 1;
+                if (cell->particles[p1].m == 0) {
+                    remove_particle_from_cell(cell, p1);
                     continue;
                 }
 
@@ -546,7 +526,7 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
                         if (y + dy >= ncside) distance_y += side;
                         if (y + dy < 0) distance_y -= side;
 
-                        double distance = sqrt(distance_x * distance_x + distance_y * distance_y) + 1e-10; // not sure if small number is necessary;
+                        double distance = sqrt(distance_x * distance_x + distance_y * distance_y);
 
                         force_x += GRAV_FORCE(pm, neighbor_cell_m, distance) * (distance_x / distance);
                         force_y += GRAV_FORCE(pm, neighbor_cell_m, distance) * (distance_y / distance);
@@ -672,7 +652,6 @@ int main(int argc, char **argv)
 
     // Print particle and collisions
     if (id == main_particle_process) {
-        //printf("Total number of collisions: %ld\n", total_collisions);
         for (long i = 0; i < process_assigned_rows; i++) {
             for (long j = 0; j < ncside; j++) {
                 for (long k = 0; k < grid[i][j].index; k++) {
