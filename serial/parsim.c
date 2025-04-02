@@ -242,45 +242,47 @@ void disable_particle(particle_t *particles, long long *n_part,
 
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
-    int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
 
-            if (cell->n_particles < 2) continue;  // No collisions possible if only 0 or 1 particle
+            if (cell->index < 2) continue;
 
-            for (long p1 = 0; p1 < cell->n_particles; p1++) {
-                if (cell->particles[p1]->m == 0) continue;  // Skip disabled particles
+            for (long p1 = 0; p1 < cell->n_particles;p1++) {
+                particle_t *particle1 = cell->particles[p1];
+                long long id1 = (long long)(particle1 - particles);
                 for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
-                    if (cell->particles[p2]->m == 0) continue;  // Skip disabled particles
-                    particle_t *particle1 = cell->particles[p1];
                     particle_t *particle2 = cell->particles[p2];
+                    if(p1 == p2 || particle2->collided == 1) continue;
+                    long long id2 = (long long)(particle2 - particles);
                     double dx = particle1->x - particle2->x;
                     double dy = particle1->y - particle2->y;
                     double distance = sqrt(dx * dx + dy * dy) + 1e-10;
-
-                    if (distance < EPSILON) {  // Collision detected
-
-                        long long id1 = (long long)(particle1 - particles);
-                        long long id2 = (long long)(particle2 - particles);
-                        //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
-                        if (to_remove[id1] == 0 && to_remove[id2] == 0) {
+                    /*if((id1 == 9746 && id2 == 6494 && distance < 0.05) || (id2 == 9746 && id1 == 6494 && distance < 0.05) || (id1 == 9746 && id2 == 6141 && distance < 0.05) || (id2 == 9746 && id1 == 6141 && distance < 0.05)){
+                        printf("P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
+                    } */
+                    
+                    if (distance < EPSILON) {
+                        if (!particle1->collided && !particle2->collided) {
+                            #pragma omp atomic
                             collisions++;
+                            /*if(id1 == 9746 || id2 == 9746 || id1 == 6494 || id2 == 6494 || id1 == 6141 || id2 == 6141){
+                                printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
+                            } */
                         }
-                        
-                        to_remove[id1] = to_remove[id2] = 1;
-
-                        disable_particle(particles, n_part, id1);
-                        disable_particle(particles, n_part, id2);
+                        particle1->collided = 1;
+                        particle2->collided = 1;
                     }
                 }
+                // Remove particle1 if it has collided
+                if (particle1->collided) {
+                    disable_particle(particles, n_part, id1);
+                }
             }
-
+            
         }
     }
-
-    free(to_remove);  // Clean up memory
     return collisions;
 }
 
