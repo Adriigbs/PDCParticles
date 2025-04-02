@@ -710,25 +710,10 @@ int main(int argc, char **argv)
 
     {
         init_process_particles(seed, side, ncside, n_part, grid, id, p, &has_main_particle);
-
-        if (has_main_particle)
-        {
-            for (int i = 0; i < p; i++)
-            {
-                if (i == id)
-                    continue;
-
-                MPI_Isend(&id, 1, MPI_INT, i, MAIN_PARTICLE_TAG, MPI_COMM_WORLD, &send_request);
-            }
-        }
-        else
-        {
-            MPI_Irecv(&main_particle_process, 1, MPI_INT, MPI_ANY_SOURCE, MAIN_PARTICLE_TAG, MPI_COMM_WORLD, &request);
-        }
-
+        
         calculate_center_of_mass(ncside, grid, id, p);
-
-
+        
+        
         for (long i = 0; i < time_steps; i++)
         {
             if (id == 0) printf("t=%ld\n", i);
@@ -737,6 +722,21 @@ int main(int argc, char **argv)
             process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
         }
     }
+    
+    if (has_main_particle){
+        for (int i = 0; i < p; i++) {
+            if (i == id)
+                continue;
+    
+            MPI_Isend(&id, 1, MPI_INT, i, MAIN_PARTICLE_TAG, MPI_COMM_WORLD, &send_request);
+        }
+    }
+    else {
+        MPI_Irecv(&main_particle_process, 1, MPI_INT, MPI_ANY_SOURCE, MAIN_PARTICLE_TAG, MPI_COMM_WORLD, &request);
+    }
+
+    printf("Process %d finished\n", id);
+    MPI_Barrier(MPI_COMM_WORLD);
 
     if (!has_main_particle)
         MPI_Wait(&request, &status);
