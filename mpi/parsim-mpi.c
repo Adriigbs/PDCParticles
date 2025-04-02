@@ -267,7 +267,7 @@ void calculate_center_of_mass(long ncside, cell_t **grid, int id, int p)
 }
 
 void update_positions(long long n_part, long ncside,
-                      cell_t **grid, double cell_side, double side, int id, int p)
+                      cell_t **grid, double cell_side, double side, int id, int p, int *has_main_particle)
 {
 
     int n_rows = ROW_SIZE(id, p, ncside);
@@ -362,12 +362,20 @@ void update_positions(long long n_part, long ncside,
                 }
                 else if (new_row < 0)
                 {
+                    if (copy.id == 1)
+                    {
+                        *has_main_particle = 0;
+                    }
                     particles[i].y = fmod(particles[i].y + side, side);
                     remove_particle_from_cell(cell, i);
                     add_particle_to_buffer(&above_particles_to_send, &above_particles_count, &size_above, copy);
                 }
                 else if (new_row >= n_rows)
                 {
+                    if (copy.id == 1)
+                    {
+                        *has_main_particle = 0;
+                    }
                     particles[i].y = fmod(particles[i].y + side, side);
                     remove_particle_from_cell(cell, i);
                     add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
@@ -432,6 +440,10 @@ void update_positions(long long n_part, long ncside,
             particle_t copy = copy_particle(&above_particles_to_recv[i]);
 
             add_particle_to_cell(&grid[0][col], copy);
+            if (copy.id == 1)
+            {
+                *has_main_particle = 1;
+            }
         }
 
         free(above_particles_to_recv);
@@ -458,6 +470,10 @@ void update_positions(long long n_part, long ncside,
             particle_t copy = copy_particle(&below_particles_to_recv[i]);
 
             add_particle_to_cell(&grid[n_rows - 1][col], copy);
+            if (copy.id == 1)
+            {
+                *has_main_particle = 1;
+            }
         }
         free(below_particles_to_recv);
     }
@@ -483,7 +499,7 @@ void update_positions(long long n_part, long ncside,
     free(to_move);
 }
 
-void update_particles(long long n_part, long ncside, cell_t **grid, double cell_side, double side, int id, int p)
+void update_particles(long long n_part, long ncside, cell_t **grid, double cell_side, double side, int id, int p, int *has_main_particle)
 {
 
     MPI_Request send_requests[2];
@@ -623,8 +639,25 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
     free(recv_below);
 
     // Update positions and speeds
-    update_positions(n_part, ncside, grid, cell_side, side, id, p);
+    update_positions(n_part, ncside, grid, cell_side, side, id, p, has_main_particle);
 }
+
+void print_particles(cell_t **grid, long ncside, int id, int p)
+{
+    for (long i = 0; i < ROW_SIZE(id, p, ncside); i++)
+    {
+        for (long j = 0; j < ncside; j++)
+        {
+            cell_t *cell = &grid[i][j];
+            for (long k = 0; k < cell->index; k++)
+            {
+                printf("%lf %lf\n", cell->particles[k].x, cell->particles[k].y);
+            }
+        }
+    }
+}
+
+
 
 int main(int argc, char **argv)
 {
@@ -695,14 +728,13 @@ int main(int argc, char **argv)
 
         calculate_center_of_mass(ncside, grid, id, p);
 
+
         for (long i = 0; i < time_steps; i++)
         {
-            //if (!id) printf("t=%ld\n", i);
-           
-            update_particles(n_part, ncside, grid, cell_side, side, id, p);
+            if (id == 0) printf("t=%ld\n", i);
+            update_particles(n_part, ncside, grid, cell_side, side, id, p, &has_main_particle);
             calculate_center_of_mass(ncside, grid, id, p);
             process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
-            
         }
     }
 
@@ -745,7 +777,6 @@ int main(int argc, char **argv)
 
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
-    exit(0);
 
     exec_time += omp_get_wtime();
     if (!id)
