@@ -60,7 +60,7 @@ void init_particles(long seed, double side, long ncside, long long n_part, parti
     }
 }
 
-void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int id, int p, int *main_particle_bool)
+void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int id, int p, char *main_particle_bool)
 {
     double (*rnd01)() = rnd_uniform01;
     long long i;
