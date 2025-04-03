@@ -37,7 +37,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 }
 
 
-void reset_grid(long ncside, cell_t grid[][ncside]) {
+void reset_grid(long ncside, cell_t **grid) {
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             grid[i][j].m = 0.0;
@@ -51,7 +51,7 @@ void reset_grid(long ncside, cell_t grid[][ncside]) {
 }
 
 
-void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
+void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t **grid, double cell_side) {
 
     for (long long i = 0; i < n_part; i++) {
 
@@ -64,17 +64,15 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
         if (x >= ncside) x = ncside - 1;
         if (y >= ncside) y = ncside - 1;
 
-        {
-            grid[y][x].particles[grid[y][x].index] = &particles[i];
-            grid[y][x].index++;
-        }
+        grid[y][x].particles[grid[y][x].index] = &particles[i];
+        grid[y][x].index++;
         
     }
 
 }
 
 // Calculate the center of mass of each cell
-void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, long seed) {
+void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t **grid, double cell_side, long seed) {
 
     reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
@@ -102,7 +100,6 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
     // Divide by the number of particles in the cell to get the center of mass
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
-            if(particles[i].m == 0) continue;
 
             if (grid[i][j].n_particles == 0) {
                 grid[i][j].m = 0;
@@ -120,7 +117,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
     split_particles_by_cell(particles, n_part, ncside, grid, cell_side);
 }
 
-void update_particles(particle_t *all_particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
+void update_particles(long long n_part, long ncside, cell_t **grid, double cell_side, double side) {
 
     // Iterate over every cell
     for (long x = 0; x < ncside; x++) {
@@ -240,10 +237,9 @@ void disable_particle(particle_t *particles, long long *n_part,
 
 }
 
-
-long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
+long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t **grid) {
     long collisions = 0;
-    
+
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
@@ -255,18 +251,16 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                 long long id1 = (long long)(particle1 - particles);
                 for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
                     particle_t *particle2 = cell->particles[p2];
-                    if(p1 == p2) continue;
+                    if(p1 == p2 || particle2->collided == 1) continue;
                     long long id2 = (long long)(particle2 - particles);
                     double dx = particle1->x - particle2->x;
                     double dy = particle1->y - particle2->y;
-                    double distance = sqrt(dx * dx + dy * dy) + 1e-10; //t=25439
-                    //printf("P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
+                    double distance = sqrt(dx * dx + dy * dy) + 1e-10;
                     
                     if (distance < EPSILON) {
-                        printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         if (!particle1->collided && !particle2->collided) {
-                            #pragma omp atomic
-                            collisions++; 
+                            collisions++;
+                            //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         }
                         particle1->collided = 1;
                         particle2->collided = 1;
@@ -282,6 +276,7 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
     }
     return collisions;
 }
+         
 
 void print_particles_and_cells(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside]) {
     // Print particles
@@ -318,10 +313,6 @@ int main(int argc, char **argv)
     parse_args(argc, argv, &seed, &side, &ncside, &n_part, &time_steps);
 
     
-
-    fesetround(FE_TONEAREST);
-
-    
     // Calculate the side size of each cell
     cell_side = (double) side / ncside;
 
@@ -329,6 +320,7 @@ int main(int argc, char **argv)
     // Initialize particles
     particle_t *particles = (particle_t*) malloc(n_part * sizeof(particle_t));
     init_particles(seed, side, ncside, n_part, particles);
+
 
     cell_t **grid = (cell_t **)malloc(ncside * sizeof(cell_t *));
     if (!grid) {
@@ -349,22 +341,18 @@ int main(int argc, char **argv)
         }
     }
 
+    
     exec_time = -omp_get_wtime();
 
-    
     {
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
 
-            print_particles_and_cells(particles, n_part, ncside, grid);
-            update_particles(particles, n_part, ncside, grid, cell_side, side);
+            //print_particles_and_cells(particles, n_part, ncside, grid);
+            update_particles(n_part, ncside, grid, cell_side, side);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
-            printf("before colllsion\n");
-            print_particles_and_cells(particles, n_part, ncside, grid);
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
-            printf("after colllsion\n");
-            print_particles_and_cells(particles, n_part, ncside, grid);
         }
     }
 
@@ -377,7 +365,6 @@ int main(int argc, char **argv)
             free(grid[i][j].particles);
         }
     }
-
     
     exec_time += omp_get_wtime();
     fprintf(stderr, "%.1fs\n", exec_time);
