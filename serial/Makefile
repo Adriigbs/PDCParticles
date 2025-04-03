@@ -1,5 +1,5 @@
 # Compiler
-CC = gcc-14
+CC = gcc
 CFLAGS = -O2 -fopenmp 
 
 # Executable name

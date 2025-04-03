@@ -86,10 +86,8 @@ void init_process_particles(long seed, double side, long ncside, long long n_par
         int row = y / cell_side;
         int col = x / cell_side;
 
-        if (col >= ncside)
-            col = ncside - 1;
-        if (row >= ncside)
-            row = ncside - 1;
+        if (col >= ncside) col = ncside - 1;
+        if (row >= ncside) row = ncside - 1;
 
         particle_t particle;
 
