@@ -21,6 +21,7 @@ typedef struct {
     long long n_particles;
     long long index;
     particle_t **particles;
+    omp_lock_t lock;
 } cell_t;
 
 
@@ -37,7 +38,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
 }
 
 
-void reset_grid(long ncside, cell_t grid[][ncside]) {
+void reset_grid(long ncside, cell_t **grid) {
     #pragma omp for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
@@ -52,7 +53,7 @@ void reset_grid(long ncside, cell_t grid[][ncside]) {
 }
 
 
-void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side) {
+void split_particles_by_cell(particle_t *particles, long long n_part, long ncside, cell_t **grid, double cell_side) {
 
     #pragma omp for 
     for (long long i = 0; i < n_part; i++) {
@@ -67,18 +68,17 @@ void split_particles_by_cell(particle_t *particles, long long n_part, long ncsid
         if (y >= ncside) y = ncside - 1;
 
         // TODO: maybe usar um lock por cell?
-        #pragma omp critical
-        {
-            grid[y][x].particles[grid[y][x].index] = &particles[i];
-            grid[y][x].index++;
-        }
+        omp_set_lock(&grid[y][x].lock);
+        grid[y][x].particles[grid[y][x].index] = &particles[i];
+        grid[y][x].index++;
+        omp_unset_lock(&grid[y][x].lock);
         
     }
 
 }
 
 // Calculate the center of mass of each cell
-void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside], double cell_side, long seed) {
+void calculate_center_of_mass(particle_t *particles, long long n_part, long ncside, cell_t **grid, double cell_side, long seed) {
 
     reset_grid(ncside, grid); // not sure if this will be necessary at the end
 
@@ -122,9 +122,9 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
                 grid[i][j].x /= grid[i][j].m;
                 #pragma omp atomic
                 grid[i][j].y /= grid[i][j].m;
-                #pragma omp critical
-                // TODO: estamos com segfault, prof suspeita que pode ser por causa disso
+                omp_set_lock(&grid[i][j].lock);
                 grid[i][j].particles = (particle_t**) realloc(grid[i][j].particles, grid[i][j].n_particles * sizeof(particle_t*));
+                omp_unset_lock(&grid[i][j].lock);
             }
         }
     }
@@ -132,7 +132,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
     split_particles_by_cell(particles, n_part, ncside, grid, cell_side);
 }
 
-void update_particles(long long n_part, long ncside, cell_t grid[][ncside], double cell_side, double side) {
+void update_particles(long long n_part, long ncside, cell_t **grid, double cell_side, double side) {
 
     // Iterate over every cell
     #pragma omp for collapse(2) schedule(dynamic) //vai juntar os dois for e dividir por celula 
@@ -254,52 +254,48 @@ void disable_particle(particle_t *particles, long long *n_part,
 
 }
 
-
-long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
+long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t **grid) {
     long collisions = 0;
-    int *to_remove = (int*) calloc(*n_part, sizeof(int));
 
     #pragma omp for collapse(2) schedule(dynamic) 
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
 
-            if (cell->n_particles < 2) continue;  // No collisions possible if only 0 or 1 particle
+            if (cell->index < 2) continue;
 
-            for (long p1 = 0; p1 < cell->n_particles; p1++) {
-                if (cell->particles[p1]->m == 0) continue;  // Skip disabled particles
+            for (long p1 = 0; p1 < cell->n_particles;p1++) {
+                particle_t *particle1 = cell->particles[p1];
+                long long id1 = (long long)(particle1 - particles);
                 for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
-                    if (cell->particles[p2]->m == 0) continue;  // Skip disabled particles
-                    particle_t *particle1 = cell->particles[p1];
                     particle_t *particle2 = cell->particles[p2];
+                    if(p1 == p2 || particle2->collided == 1) continue;
+                    long long id2 = (long long)(particle2 - particles);
                     double dx = particle1->x - particle2->x;
                     double dy = particle1->y - particle2->y;
                     double distance = sqrt(dx * dx + dy * dy) + 1e-10;
-
-                    if (distance < EPSILON) {  // Collision detected
-
-                        long long id1 = (long long)(particle1 - particles);
-                        long long id2 = (long long)(particle2 - particles);
-                        //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
-                        if (to_remove[id1] == 0 && to_remove[id2] == 0) {
+                    
+                    if (distance < EPSILON) {
+                        if (!particle1->collided && !particle2->collided) {
                             #pragma omp atomic
                             collisions++;
+                            //printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         }
-                        
-                        to_remove[id1] = to_remove[id2] = 1;
-
-                        disable_particle(particles, n_part, id1);
-                        disable_particle(particles, n_part, id2);
+                        particle1->collided = 1;
+                        particle2->collided = 1;
                     }
                 }
+                // Remove particle1 if it has collided
+                if (particle1->collided) {
+                    disable_particle(particles, n_part, id1);
+                }
             }
-
+            
         }
     }
-
-    free(to_remove);  // Clean up memory
     return collisions;
 }
+         
 
 void print_particles_and_cells(particle_t *particles, long long n_part, long ncside, cell_t grid[][ncside]) {
     // Print particles
@@ -344,11 +340,35 @@ int main(int argc, char **argv)
     particle_t *particles = (particle_t*) malloc(n_part * sizeof(particle_t));
     init_particles(seed, side, ncside, n_part, particles);
 
-    cell_t grid[ncside][ncside];
 
+    cell_t **grid = (cell_t **)malloc(ncside * sizeof(cell_t *));
+    if (!grid) {
+        fprintf(stderr, "Failed to allocate grid rows\n");
+        free(particles);
+        exit(1);
+    }
+
+    for (long i = 0; i < ncside; i++) {
+        grid[i] = (cell_t *)malloc(ncside * sizeof(cell_t));
+        if (!grid[i]) {
+            fprintf(stderr, "Failed to allocate grid columns\n");
+            // Free already allocated memory
+            for (long j = 0; j < i; j++) free(grid[j]);
+            free(grid);
+            free(particles);
+            exit(1);
+        }
+    }
+    
+    #pragma omp parallel for collapse(2)
+    for (long i = 0; i < ncside; i++) {
+        for (long j = 0; j < ncside; j++) {
+            omp_init_lock(&grid[i][j].lock);
+        }
+    }
+    
     exec_time = -omp_get_wtime();
 
-    
     #pragma omp parallel
     {
         calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
@@ -372,9 +392,9 @@ int main(int argc, char **argv)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             free(grid[i][j].particles);
+            omp_destroy_lock(&grid[i][j].lock);
         }
     }
-
     
     exec_time += omp_get_wtime();
     fprintf(stderr, "%.1fs\n", exec_time);
