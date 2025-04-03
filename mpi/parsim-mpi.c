@@ -328,7 +328,21 @@ void update_positions(long long n_part, long ncside, cell_t **grid, double cell_
                     }
                     remove_particle_from_cell(cell, i);
                     add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
-                } 
+                } else if (new_row < process_low) {
+                    if (copy.id == 1) {
+                        *has_main_particle = 0;
+                    }
+                    remove_particle_from_cell(cell, i);
+                    add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
+                } else if (new_row >= process_high) {
+                    if (copy.id == 1) {
+                        *has_main_particle = 0;
+                    }
+                    remove_particle_from_cell(cell, i);
+                    add_particle_to_buffer(&above_particles_to_send, &above_particles_count, &size_above, copy);
+                } else {
+                    i++;
+                }
 
                 
             }
