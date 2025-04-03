@@ -483,57 +483,22 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
     int below = (id + 1) % p;
 
     // centers of mass of highest and lowest rows, to send to neighboring processes
-    center_of_mass *send_above = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
-    center_of_mass *send_below = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
     center_of_mass *recv_above = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
     center_of_mass *recv_below = (center_of_mass *)malloc(ncside * sizeof(center_of_mass));
-    
-    for (long x = 0; x < ncside; x++) {
-        send_above[x].m = grid[0][x].m;
-        send_above[x].x = grid[0][x].x;
-        send_above[x].y = grid[0][x].y;
-        send_below[x].m = grid[n_rows - 1][x].m;
-        send_below[x].x = grid[n_rows - 1][x].x;
-        send_below[x].y = grid[n_rows - 1][x].y;
-    }
 
-        /*
-        printf("Process %d sending to %d and %d\n", id, above, below);
-        for (long x = 0; x < ncside; x++) {
-            printf("Process %d Cell %ld %ld mass: %lf x: %lf y: %lf\n", id, (long)0, x, send_above[x].m, send_above[x].x, send_above[x].y);
-            printf("Process %d Cell %ld %ld mass: %lf x: %lf y: %lf\n", id, n_rows - 1, x, send_below[x].m, send_below[x].x, send_below[x].y);
-            fflush(stdout);
-        }
-        */
-    
 
 
     MPI_Irecv(recv_above, ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &recv_requests[recv_request_count++]);
     MPI_Irecv(recv_below, ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &recv_requests[recv_request_count++]);
 
 
-    MPI_Isend(send_above, ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
-    MPI_Isend(send_below, ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
+    MPI_Isend(grid[0], ncside, MPI_cell_t, above, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
+    MPI_Isend(grid[n_rows-1], ncside, MPI_cell_t, below, 0, MPI_COMM_WORLD, &send_requests[send_request_count++]);
 
     MPI_Waitall(recv_request_count, recv_requests, statuses);
     
     MPI_Barrier(MPI_COMM_WORLD);
 
-    /*
-    // Debugging output: Print information about data received from the process above
-    printf("Process %d received from above\n", id);
-    for (long x = 0; x < ncside; x++) {
-        printf("Process %d Cell received %ld %ld mass: %lf x: %lf y: %lf\n", id, (long)0, x, recv_above[x].m, recv_above[x].x, recv_above[x].y);
-        fflush(stdout);
-    }
-
-    // Debugging output: Print information about data received from the process below
-    printf("Process %d received from below\n", id);
-    for (long x = 0; x < ncside; x++) {
-        printf("Process %d received Cell %ld %ld mass: %lf x: %lf y: %lf\n", id, n_rows - 1, x, recv_below[x].m, recv_below[x].x, recv_below[x].y);
-        fflush(stdout);
-    }
-    */
 
     for (long y = 0; y < n_rows; y++) {
         for (long x = 0; x < ncside; x++) {
@@ -616,8 +581,7 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
 
     free(recv_above);
     free(recv_below);
-    free(send_above);
-    free(send_below);
+
 
     // Update positions and speeds
     update_positions(n_part, ncside, grid, cell_side, side, id, p, has_main_particle);
