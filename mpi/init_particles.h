@@ -15,6 +15,6 @@ typedef struct
 // Function prototype
 void init_particles(long seed, double side, long ncside, long long n_part, particle_t *par);
 
-void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int process_id, int num_processes, char *main_particle_bool);
+void init_process_particles(long seed, double side, long ncside, long long n_part, cell_t **grid, int id, int p, char *main_particle_bool);
 
 #endif // INIT_PARTICLES_H

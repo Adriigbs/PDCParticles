@@ -136,7 +136,7 @@ long detect_collisions(particle_t *particles, long ncside, cell_t **grid, int id
 
             if (cell->index < 2) continue;
 
-            int p1 = 0;
+            long p1 = 0;
             while (p1 < cell->index) {
                 int collision_group[3];
                 int collision_count = 0;
@@ -276,8 +276,6 @@ void update_positions(long long n_part, long ncside, cell_t **grid, double cell_
             long long i = 0;
             // Iterate over every particle from each cell
             while (i < cell->index) {
-
-                if (i >= cell->index) break;
                 
                 if (particles[i].m == 0) {
                     i++;
@@ -328,13 +326,13 @@ void update_positions(long long n_part, long ncside, cell_t **grid, double cell_
                     }
                     remove_particle_from_cell(cell, i);
                     add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
-                } else if (new_row < process_low) {
+                } else if (new_row < process_low) { // wrapped around
                     if (copy.id == 1) {
                         *has_main_particle = 0;
                     }
                     remove_particle_from_cell(cell, i);
                     add_particle_to_buffer(&below_particles_to_send, &below_particles_count, &size_below, copy);
-                } else if (new_row >= process_high) {
+                } else if (new_row >= process_high) { // wrapped around
                     if (copy.id == 1) {
                         *has_main_particle = 0;
                     }
@@ -343,8 +341,6 @@ void update_positions(long long n_part, long ncside, cell_t **grid, double cell_
                 } else {
                     i++;
                 }
-
-                
             }
         }
     }
@@ -685,17 +681,12 @@ int main(int argc, char **argv)
     exec_time = -omp_get_wtime();
     
     {
-
-
         init_process_particles(seed, side, ncside, n_part, grid, id, p, &has_main_particle);
-        
 
         calculate_center_of_mass(ncside, grid, id, p);
-
-
        
         for (long i = 0; i < time_steps; i++) {
-            if (id == 0) printf("t = %ld\n", i);
+            // if (id == 0) printf("t = %ld\n", i);
             update_particles(n_part, ncside, grid, cell_side, side, id, p, &has_main_particle);
             calculate_center_of_mass(ncside, grid, id, p);
             process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
@@ -727,6 +718,7 @@ int main(int argc, char **argv)
                 for (long k = 0; k < grid[i][j].index; k++) {
                     if (grid[i][j].particles[k].id == 1) {
                         printf("%.3lf %.3lf\n%ld\n", grid[i][j].particles[k].x, grid[i][j].particles[k].y, total_collisions);
+                        fflush(stdout);
                     }
                 }
             }
