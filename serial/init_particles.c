@@ -31,17 +31,17 @@ double rnd_normal01()
     return result;
 }
 
-void init_particles(long seed, double side, long ncside, long long n_part, particle_t *par)
+void init_particles(long userseed, double side, long ncside, long long n_part, particle_t *par)
 {
     double (*rnd01)() = rnd_uniform01;
     long long i;
 
-    if(seed < 0) {
+    if(userseed < 0) {
         rnd01 = rnd_normal01;
-        seed = -seed;
+        userseed = -userseed;
     }
     
-    init_r4uni(seed);
+    init_r4uni(userseed);
 
     for(i = 0; i < n_part; i++) {
         par[i].x = rnd01() * side;

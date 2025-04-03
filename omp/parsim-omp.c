@@ -359,7 +359,8 @@ int main(int argc, char **argv)
             exit(1);
         }
     }
-
+    
+    #pragma omp parallel for collapse(2)
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             omp_init_lock(&grid[i][j].lock);

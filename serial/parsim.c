@@ -102,6 +102,7 @@ void calculate_center_of_mass(particle_t *particles, long long n_part, long ncsi
     // Divide by the number of particles in the cell to get the center of mass
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
+            if(particles[i].m == 0) continue;
 
             if (grid[i][j].n_particles == 0) {
                 grid[i][j].m = 0;
@@ -242,7 +243,7 @@ void disable_particle(particle_t *particles, long long *n_part,
 
 long detect_collisions(particle_t *particles, long long *n_part, long ncside, cell_t grid[][ncside]) {
     long collisions = 0;
-
+    
     for (long i = 0; i < ncside; i++) {
         for (long j = 0; j < ncside; j++) {
             cell_t *cell = &grid[i][j];
@@ -254,22 +255,18 @@ long detect_collisions(particle_t *particles, long long *n_part, long ncside, ce
                 long long id1 = (long long)(particle1 - particles);
                 for (long p2 = p1 + 1; p2 < cell->n_particles; p2++) {
                     particle_t *particle2 = cell->particles[p2];
-                    if(p1 == p2 || particle2->collided == 1) continue;
+                    if(p1 == p2) continue;
                     long long id2 = (long long)(particle2 - particles);
                     double dx = particle1->x - particle2->x;
                     double dy = particle1->y - particle2->y;
-                    double distance = sqrt(dx * dx + dy * dy) + 1e-10;
-                    /*if((id1 == 9746 && id2 == 6494 && distance < 0.05) || (id2 == 9746 && id1 == 6494 && distance < 0.05) || (id1 == 9746 && id2 == 6141 && distance < 0.05) || (id2 == 9746 && id1 == 6141 && distance < 0.05)){
-                        printf("P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
-                    } */
+                    double distance = sqrt(dx * dx + dy * dy) + 1e-10; //t=25439
+                    //printf("P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                     
                     if (distance < EPSILON) {
+                        printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
                         if (!particle1->collided && !particle2->collided) {
                             #pragma omp atomic
-                            collisions++;
-                            /*if(id1 == 9746 || id2 == 9746 || id1 == 6494 || id2 == 6494 || id1 == 6141 || id2 == 6141){
-                                printf("   [Collision] P%lld and P%lld (Distance: %lf)\n", id1, id2, distance);
-                            } */
+                            collisions++; 
                         }
                         particle1->collided = 1;
                         particle2->collided = 1;
@@ -320,7 +317,9 @@ int main(int argc, char **argv)
     // Parse arguments from command line
     parse_args(argc, argv, &seed, &side, &ncside, &n_part, &time_steps);
 
-    omp_set_num_threads(omp_get_max_threads());
+    
+
+    fesetround(FE_TONEAREST);
 
     
     // Calculate the side size of each cell
@@ -331,7 +330,24 @@ int main(int argc, char **argv)
     particle_t *particles = (particle_t*) malloc(n_part * sizeof(particle_t));
     init_particles(seed, side, ncside, n_part, particles);
 
-    cell_t grid[ncside][ncside];
+    cell_t **grid = (cell_t **)malloc(ncside * sizeof(cell_t *));
+    if (!grid) {
+        fprintf(stderr, "Failed to allocate grid rows\n");
+        free(particles);
+        exit(1);
+    }
+
+    for (long i = 0; i < ncside; i++) {
+        grid[i] = (cell_t *)malloc(ncside * sizeof(cell_t));
+        if (!grid[i]) {
+            fprintf(stderr, "Failed to allocate grid columns\n");
+            // Free already allocated memory
+            for (long j = 0; j < i; j++) free(grid[j]);
+            free(grid);
+            free(particles);
+            exit(1);
+        }
+    }
 
     exec_time = -omp_get_wtime();
 
@@ -341,10 +357,14 @@ int main(int argc, char **argv)
         for (long i = 0; i < time_steps; i++) {
             //printf("t=%ld\n", i);
 
-            //print_particles_and_cells(particles, n_part, ncside, grid);
+            print_particles_and_cells(particles, n_part, ncside, grid);
             update_particles(particles, n_part, ncside, grid, cell_side, side);
             calculate_center_of_mass(particles, n_part, ncside, grid, cell_side, seed);
+            printf("before colllsion\n");
+            print_particles_and_cells(particles, n_part, ncside, grid);
             total_num_collisions += detect_collisions(particles, &n_part, ncside, grid);
+            printf("after colllsion\n");
+            print_particles_and_cells(particles, n_part, ncside, grid);
         }
     }
 
