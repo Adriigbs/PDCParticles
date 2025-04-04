@@ -126,7 +126,7 @@ void parse_args(int argc, char **argv, long *seed, double *side, long *ncside, l
     *n_steps = atol(argv[5]);
 }
 
-long detect_collisions(particle_t *particles, long ncside, cell_t **grid, int id, int p) {
+long detect_collisions(long ncside, cell_t **grid, int id, int p) {
     long collisions = 0;
     int rows = ROW_SIZE(id, p, ncside);
 
@@ -233,7 +233,7 @@ void calculate_center_of_mass(long ncside, cell_t **grid, int id, int p) {
     }
 }
 
-void update_positions(long long n_part, long ncside, cell_t **grid, double cell_side,
+void update_positions(long ncside, cell_t **grid, double cell_side,
                       double side, int id, int p, char *has_main_particle)
 {
 
@@ -462,7 +462,7 @@ void update_positions(long long n_part, long ncside, cell_t **grid, double cell_
 
 }
 
-void update_particles(long long n_part, long ncside, cell_t **grid, double cell_side,
+void update_particles(long ncside, cell_t **grid, double cell_side,
                       double side, int id, int p, char *has_main_particle) {
 
     MPI_Request send_requests[2];
@@ -580,7 +580,7 @@ void update_particles(long long n_part, long ncside, cell_t **grid, double cell_
 
 
     // Update positions and speeds
-    update_positions(n_part, ncside, grid, cell_side, side, id, p, has_main_particle);
+    update_positions(ncside, grid, cell_side, side, id, p, has_main_particle);
 }
 
 void print_particles(cell_t **grid, long ncside, int id, int p) {
@@ -651,10 +651,9 @@ int main(int argc, char **argv)
        
         for (long i = 0; i < time_steps; i++) {
             // if (id == 0) printf("t = %ld\n", i);
-            update_particles(n_part, ncside, grid, cell_side, side, id, p, &has_main_particle);
+            update_particles(ncside, grid, cell_side, side, id, p, &has_main_particle);
             calculate_center_of_mass(ncside, grid, id, p);
-            process_num_collisions += detect_collisions(grid[0][0].particles, ncside, grid, id, p);
-          
+            process_num_collisions += detect_collisions(ncside, grid, id, p);
         }
     }
     
